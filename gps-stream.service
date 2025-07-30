@@ -16,10 +16,11 @@ Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=15
 StartLimitBurst=10
-# Fixed: Use MemoryMax instead of deprecated MemoryLimit
-MemoryMax=256M
 StandardOutput=journal
 StandardError=journal
+
+# Resource limits for Pi 2 - Fixed: Use MemoryMax instead of MemoryLimit
+MemoryMax=256M
 
 # Process management
 KillMode=control-group
