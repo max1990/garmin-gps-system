@@ -5,12 +5,14 @@ Wants=gps-stream.service
 
 [Service]
 Type=simple
-ExecStart=/home/cuas/system_watchdog.py
+ExecStart=/usr/bin/python3 /home/cuas/system_watchdog.py
 Restart=always
 RestartSec=30
 User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
