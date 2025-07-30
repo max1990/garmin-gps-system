@@ -51,7 +51,7 @@ PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null || echo "Unknown")
 log_info "Detected: $PI_MODEL"
 
 # Get the GitHub repository URL
-GITHUB_USER="YOUR-USERNAME"  # You'll replace this with your actual username
+GITHUB_USER="max1990"
 REPO_NAME="garmin-gps-system"
 BASE_URL="https://raw.githubusercontent.com/$GITHUB_USER/$REPO_NAME/main"
 
