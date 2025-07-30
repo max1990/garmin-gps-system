@@ -207,7 +207,7 @@ chmod +x /home/cuas/*.py /home/cuas/*.sh 2>/dev/null || log_warn "Could not set 
 chown root:root /home/cuas/* 2>/dev/null || log_warn "Could not set all file ownership"
 
 # Add users to required groups (don't fail if user doesn't exist)
-usermod -a -G dialout,i2c,gpio cuas 2>/dev/null || log_warn "Could not add 'pi' user to groups (may not exist)"
+usermod -a -G dialout,i2c,gpio cuas 2>/dev/null || log_warn "Could not add 'cuas' user to groups (may not exist)"
 usermod -a -G dialout,i2c,gpio root 2>/dev/null || log_warn "Could not add 'root' user to groups"
 
 # Create default compass calibration
