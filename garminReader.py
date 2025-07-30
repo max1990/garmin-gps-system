@@ -205,10 +205,12 @@ class GPSDManager:
 
 ### New Code START
     
+# Replace the existing enhanced_restart_gpsd method in your GPSDManager class with this improved version
+
     def enhanced_restart_gpsd(self):
         """
         Enhanced GPSD restart that matches your manual recovery commands
-        This implements the exact sequence you run manually
+        This implements the exact sequence you run manually for maximum robustness
         """
         try:
             logger.info("Performing enhanced GPSD restart (full system cleanup)...")
@@ -225,7 +227,7 @@ class GPSDManager:
             except Exception as e:
                 logger.warning(f"Could not list gpsd processes: {e}")
             
-            # Step 2: Stop all gpsd services (aggressive approach)
+            # Step 2: Stop all gpsd services (systemctl stop)
             logger.info("Stopping all gpsd services...")
             stop_commands = [
                 ['systemctl', 'stop', 'gpsd'],
@@ -236,54 +238,39 @@ class GPSDManager:
             
             for cmd in stop_commands:
                 try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                    if result.returncode == 0:
-                        logger.info(f"Success: {' '.join(cmd)}")
-                    else:
-                        logger.warning(f"Non-zero exit for {' '.join(cmd)}: {result.stderr}")
-                except subprocess.TimeoutExpired:
-                    logger.error(f"Timeout executing: {' '.join(cmd)}")
+                    subprocess.run(cmd, capture_output=True, timeout=10)
+                    logger.debug(f"Executed: {' '.join(cmd)}")
                 except Exception as e:
-                    logger.warning(f"Failed to run {' '.join(cmd)}: {e}")
+                    logger.debug(f"Command {' '.join(cmd)} failed (expected): {e}")
             
-            # Step 3: Kill any remaining gpsd processes (more aggressive)
-            logger.info("Killing any remaining gpsd processes...")
-            kill_commands = [
-                ['pkill', '-f', 'gpsd'],
-                ['pkill', '-9', '-f', 'gpsd'],  # Force kill if needed
-                ['killall', 'gpsd'],
-                ['killall', '-9', 'gpsd']
-            ]
+            # Step 3: Kill any remaining gpsd processes (pkill -f gpsd)
+            logger.info("Killing remaining gpsd processes...")
+            try:
+                subprocess.run(['pkill', '-f', 'gpsd'], capture_output=True, timeout=10)
+                time.sleep(2)  # Wait a moment like in your manual process
+            except Exception as e:
+                logger.debug(f"pkill command result: {e}")
             
-            for cmd in kill_commands:
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    if result.returncode == 0:
-                        logger.info(f"Successfully killed processes with: {' '.join(cmd)}")
-                except:
-                    pass  # Expected to fail if no processes exist
-            
-            # Step 4: Wait longer for processes to die
-            logger.info("Waiting for processes to terminate...")
-            time.sleep(5)  # Increased wait time
-            
-            # Step 5: Verify nothing is running (like your manual check)
-            logger.info("Verifying no gpsd processes remain...")
+            # Step 4: Verify nothing is running (ps aux | grep gpsd)
+            logger.info("Verifying process cleanup...")
             try:
                 result = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=10)
-                remaining_gpsd = [line for line in result.stdout.split('\n') if 'gpsd' in line and 'grep' not in line]
-                if remaining_gpsd:
-                    logger.warning(f"WARNING: {len(remaining_gpsd)} gpsd processes still running:")
-                    for proc in remaining_gpsd:
+                remaining_processes = [line for line in result.stdout.split('\n') 
+                                     if 'gpsd' in line and 'grep' not in line]
+                
+                if remaining_processes:
+                    logger.warning(f"Still found {len(remaining_processes)} gpsd processes:")
+                    for proc in remaining_processes:
                         logger.warning(f"  {proc}")
                     # Try one more aggressive kill
                     subprocess.run(['pkill', '-9', '-f', 'gpsd'], capture_output=True, timeout=5)
+                    time.sleep(1)
                 else:
                     logger.info("SUCCESS: All gpsd processes terminated")
             except Exception as e:
                 logger.error(f"Could not verify process cleanup: {e}")
             
-            # Step 6: Remove stale sockets and lock files
+            # Step 5: Remove stale sockets and lock files
             logger.info("Cleaning up stale files...")
             cleanup_paths = [
                 '/var/run/gpsd.sock',
@@ -300,87 +287,66 @@ class GPSDManager:
                     except Exception as e:
                         logger.warning(f"Could not remove {path}: {e}")
             
-            # Step 7: Wait before restart (like your manual process)
+            # Step 6: Wait before restart (like your manual process)
             logger.info("Waiting before restart...")
             time.sleep(3)
             
-            # Step 8: Start our own GPSD instance (if device is present)
+            # Step 7: Start our own GPSD instance (if device is present)
             if self.check_device():
-                logger.info(f"Starting gpsd for device {self.device_path}...")
-                try:
-                    # Start gpsd with explicit parameters
-                    cmd = ['gpsd', self.device_path, '-F', '/var/run/gpsd.sock', '-n', '-b']
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-                    
-                    if result.returncode == 0:
-                        logger.info("GPSD started successfully")
-                        time.sleep(3)  # Give it time to initialize
-                        
-                        # Verify it's running
-                        if self.verify_gpsd_running():
-                            logger.info("GPSD restart completed successfully")
-                            return True
-                        else:
-                            logger.error("GPSD not running after start")
-                            return False
-                    else:
-                        logger.error(f"Failed to start gpsd: {result.stderr}")
-                        return False
-                        
-                except subprocess.TimeoutExpired:
-                    logger.error("GPSD start command timed out")
-                    return False
-                except Exception as e:
-                    logger.error(f"Exception starting gpsd: {e}")
+                if self.start_gpsd_instance():
+                    logger.info("GPSD restart completed successfully")
+                    return True
+                else:
+                    logger.error("Failed to start GPSD instance")
                     return False
             else:
-                logger.warning("Device not present, cannot start gpsd")
+                logger.warning(f"Device {self.device_path} not present, skipping GPSD start")
                 return False
                 
         except Exception as e:
-            logger.error(f"Enhanced GPSD restart failed: {e}")
+            logger.error(f"Enhanced restart failed with exception: {e}")
             return False
+        
+        def restart_gpsd(self):
+            """
+            Legacy method - redirects to enhanced restart for backward compatibility
+            This ensures all existing calls work with the improved restart logic
+            """
+            logger.info("Using enhanced restart method for better reliability...")
+            return self.enhanced_restart_gpsd()
     
-    def restart_gpsd(self):
-        """
-        Legacy method - redirects to enhanced restart for backward compatibility
-        This ensures all existing calls work with the improved restart logic
-        """
-        logger.info("Using enhanced restart method for better reliability...")
-        return self.enhanced_restart_gpsd()
-
-    def verify_gpsd_running(self):
-        """
-        Verify that GPSD is actually running and responding
-        Returns True if GPSD is functional, False otherwise
-        """
-        try:
-            # Check if gpsd process exists
-            result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, timeout=5)
-            if result.returncode != 0:
-                logger.warning("No gpsd process found")
-                return False
-            
-            # Try to connect to gpsd to verify it's responding
+        def verify_gpsd_running(self):
+            """
+            Verify that GPSD is actually running and responding
+            Returns True if GPSD is functional, False otherwise
+            """
             try:
-                test_sock = socket.create_connection(('localhost', 2947), timeout=5)
-                test_sock.sendall(b'?VERSION;\n')
-                test_sock.settimeout(3.0)
-                
-                # Try to read response
-                response = test_sock.recv(1024)
-                test_sock.close()
-                
-                if b'VERSION' in response:
-                    logger.debug("GPSD is running and responding")
-                    return True
-                else:
-                    logger.warning("GPSD not responding properly")
+                # Check if gpsd process exists
+                result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, timeout=5)
+                if result.returncode != 0:
+                    logger.warning("No gpsd process found")
                     return False
+                
+                # Try to connect to gpsd to verify it's responding
+                try:
+                    test_sock = socket.create_connection(('localhost', 2947), timeout=5)
+                    test_sock.sendall(b'?VERSION;\n')
+                    test_sock.settimeout(3.0)
                     
-            except Exception as e:
-                logger.warning(f"GPSD connection test failed: {e}")
-                return False
+                    # Try to read response
+                    response = test_sock.recv(1024)
+                    test_sock.close()
+                    
+                    if b'VERSION' in response:
+                        logger.debug("GPSD is running and responding")
+                        return True
+                    else:
+                        logger.warning("GPSD not responding properly")
+                        return False
+                        
+                except Exception as e:
+                    logger.warning(f"GPSD connection test failed: {e}")
+                    return False
                 
         except subprocess.TimeoutExpired:
             logger.error("Process check timed out")
