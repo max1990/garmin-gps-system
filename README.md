@@ -16,4 +16,4 @@ Mission-critical GPS and compass broadcasting system for Raspberry Pi with autom
 Run this single command on your Raspberry Pi:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR-USERNAME/garmin-gps-system/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/install.sh | sudo bash
