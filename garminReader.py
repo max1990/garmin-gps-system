@@ -341,35 +341,106 @@ class GPSDManager:
             logger.error(f"Enhanced GPSD restart failed: {e}")
             return False
     
+    def restart_gpsd(self):
+        """
+        Legacy method - redirects to enhanced restart for backward compatibility
+        This ensures all existing calls work with the improved restart logic
+        """
+        logger.info("Using enhanced restart method for better reliability...")
+        return self.enhanced_restart_gpsd()
+
     def verify_gpsd_running(self):
-        """Verify that gpsd is actually running and responding"""
+        """
+        Verify that GPSD is actually running and responding
+        Returns True if GPSD is functional, False otherwise
+        """
         try:
-            # Check if process exists
-            result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, text=True, timeout=5)
+            # Check if gpsd process exists
+            result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, timeout=5)
             if result.returncode != 0:
-                logger.error("No gpsd process found")
+                logger.warning("No gpsd process found")
                 return False
             
-            # Check if socket exists
-            if not os.path.exists('/var/run/gpsd.sock'):
-                logger.error("GPSD socket not found")
-                return False
-            
-            # Try to connect to gpsd (basic connectivity test)
+            # Try to connect to gpsd to verify it's responding
             try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                sock.connect(('localhost', 2947))
-                sock.close()
-                logger.info("GPSD is running and accepting connections")
-                return True
+                test_sock = socket.create_connection(('localhost', 2947), timeout=5)
+                test_sock.sendall(b'?VERSION;\n')
+                test_sock.settimeout(3.0)
+                
+                # Try to read response
+                response = test_sock.recv(1024)
+                test_sock.close()
+                
+                if b'VERSION' in response:
+                    logger.debug("GPSD is running and responding")
+                    return True
+                else:
+                    logger.warning("GPSD not responding properly")
+                    return False
+                    
             except Exception as e:
-                logger.warning(f"GPSD process exists but not accepting connections: {e}")
+                logger.warning(f"GPSD connection test failed: {e}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Process check timed out")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to verify GPSD: {e}")
+            return False
+
+    def start_gpsd_instance(self):
+        """
+        Start a new GPSD instance with proper error handling
+        This method is called by enhanced_restart_gpsd
+        """
+        if not self.check_device():
+            logger.error(f"Cannot start GPSD: device {self.device_path} not present")
+            return False
+        
+        try:
+            logger.info(f"Starting gpsd for device {self.device_path}...")
+            
+            # Start gpsd with explicit parameters matching your working manual process
+            cmd = ['gpsd', self.device_path, '-F', '/var/run/gpsd.sock', '-n', '-b']
+            
+            # Use Popen for better control
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Give it a moment to start
+            time.sleep(2)
+            
+            # Check if it's still running
+            if process.poll() is None:
+                logger.info("GPSD process started successfully")
+                time.sleep(1)  # Additional stabilization time
+                
+                # Verify it's actually working
+                if self.verify_gpsd_running():
+                    logger.info("GPSD verified as functional")
+                    return True
+                else:
+                    logger.error("GPSD started but not responding")
+                    # Kill the non-functional process
+                    try:
+                        process.terminate()
+                        process.wait(timeout=5)
+                    except:
+                        process.kill()
+                    return False
+            else:
+                # Process died immediately
+                stdout, stderr = process.communicate()
+                logger.error(f"GPSD failed to start: {stderr}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Could not verify gpsd status: {e}")
+            logger.error(f"Exception starting GPSD: {e}")
             return False
 
 # New Code END
