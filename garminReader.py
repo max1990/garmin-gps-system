@@ -1,6 +1,6 @@
 """
 garminReader: UDP rebroadcaster for Garmin NMEA Data with Compass Integration
-Enhanced with systemd watchdog support and comprehensive monitoring
+Enhanced with proper GPSD conflict resolution and robust USB recovery
 
 Author:		Maximilian Leutermann
 Date:		29 July 2025
@@ -34,7 +34,7 @@ GPSD_HOST = "localhost"
 GPSD_PORT = 2947
 DEVICE_PATH = "/dev/ttyUSB0"
 DEVICE_CHECK_INTERVAL = 5
-WATCHDOG_INTERVAL = 30  # Send watchdog keepalive every 30s
+WATCHDOG_INTERVAL = 30
 
 # Compass I2C configuration
 I2C_BUS = 1
@@ -83,14 +83,11 @@ class CompassReader:
             self.load_calibration()
             
             # Initialize QMC5883L
-            # Control Register 1: Continuous mode, 200Hz, 2G range, OSR 512
             self.bus.write_byte_data(QMC5883L_ADDR, 0x09, 0x1D)
             time.sleep(0.01)
             
             # Test read to verify connection
             chip_id = self.bus.read_byte_data(QMC5883L_ADDR, 0x0D)
-            if chip_id != 0xFF:
-                logger.warning(f"Unexpected chip ID: 0x{chip_id:02X}, expected 0xFF")
             
             self.compass_active = True
             logger.info("Compass initialized successfully")
@@ -113,20 +110,18 @@ class CompassReader:
         try:
             # Check data ready
             status = self.bus.read_byte_data(QMC5883L_ADDR, 0x06)
-            if not (status & 0x01):  # Data not ready
+            if not (status & 0x01):
                 return self.last_valid_heading
             
-            # Read X, Y, Z values (6 bytes)
+            # Read X, Y, Z values
             data = self.bus.read_i2c_block_data(QMC5883L_ADDR, 0x00, 6)
             
             # Convert to signed 16-bit values
             x = (data[1] << 8) | data[0]
             y = (data[3] << 8) | data[2]
             
-            if x > 32767:
-                x -= 65536
-            if y > 32767:
-                y -= 65536
+            if x > 32767: x -= 65536
+            if y > 32767: y -= 65536
             
             # Apply calibration
             x_cal = x - self.calibration_offset_x
@@ -137,7 +132,6 @@ class CompassReader:
             heading_rad = math.atan2(y_cal, x_cal)
             heading_deg = math.degrees(heading_rad)
             
-            # Normalize to 0-359 degrees
             if heading_deg < 0:
                 heading_deg += 360
                 
@@ -153,33 +147,102 @@ class CompassReader:
                 return self.last_valid_heading
     
     def get_heading(self):
-        """Get current heading thread-safe"""
         with self.lock:
             return self.heading
 
-class DeviceMonitor:
-    """Monitor USB device connection and restart services if needed"""
+class GPSDManager:
+    """Enhanced GPSD manager that handles system conflicts and recovery"""
     
     def __init__(self, device_path):
         self.device_path = device_path
         self.device_present = False
         
+    def kill_system_gpsd(self):
+        """Completely stop system GPSD services that conflict with ours"""
+        try:
+            logger.info("Stopping system GPSD services...")
+            
+            # Stop and disable system gpsd services
+            commands = [
+                ['systemctl', 'stop', 'gpsd'],
+                ['systemctl', 'stop', 'gpsd.socket'],
+                ['systemctl', 'disable', 'gpsd'],
+                ['systemctl', 'disable', 'gpsd.socket']
+            ]
+            
+            for cmd in commands:
+                try:
+                    subprocess.run(cmd, check=False, capture_output=True)
+                except Exception:
+                    pass  # Ignore errors if services don't exist
+            
+            # Kill any remaining gpsd processes
+            subprocess.run(['pkill', '-f', 'gpsd'], check=False)
+            
+            # Wait for processes to die
+            time.sleep(2)
+            
+            logger.info("System GPSD services stopped")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to stop system GPSD: {e}")
+            return False
+    
     def check_device(self):
-        """Check if USB device is present"""
-        return os.path.exists(self.device_path)
+        """Check if GPS device is present"""
+        present = os.path.exists(self.device_path)
+        
+        # Log device state changes
+        if present != self.device_present:
+            if present:
+                logger.info(f"GPS device {self.device_path} connected")
+            else:
+                logger.warning(f"GPS device {self.device_path} disconnected")
+        
+        self.device_present = present
+        return present
     
     def restart_gpsd(self):
-        """Restart gpsd service"""
+        """Restart GPSD with proper cleanup"""
         try:
-            logger.info("Restarting gpsd service...")
-            subprocess.run(['sudo', 'pkill', 'gpsd'], check=False)
-            time.sleep(2)
-            subprocess.run(['sudo', 'gpsd', self.device_path, '-F', '/var/run/gpsd.sock'], check=True)
-            time.sleep(2)
-            logger.info("gpsd restarted successfully")
-            return True
+            logger.info("Restarting GPSD with full cleanup...")
+            
+            # Step 1: Kill system GPSD completely
+            self.kill_system_gpsd()
+            
+            # Step 2: Remove stale socket
+            socket_path = '/var/run/gpsd.sock'
+            if os.path.exists(socket_path):
+                try:
+                    os.remove(socket_path)
+                    logger.info("Removed stale GPSD socket")
+                except Exception as e:
+                    logger.warning(f"Could not remove socket: {e}")
+            
+            # Step 3: Wait for device to be ready
+            if not self.device_present:
+                logger.warning("Device not present, cannot start GPSD")
+                return False
+            
+            # Step 4: Start our GPSD instance
+            cmd = ['gpsd', self.device_path, '-F', socket_path, '-n']
+            subprocess.run(cmd, check=True)
+            
+            # Step 5: Give GPSD time to initialize
+            time.sleep(3)
+            
+            # Step 6: Verify GPSD is running
+            result = subprocess.run(['pgrep', 'gpsd'], capture_output=True)
+            if result.returncode == 0:
+                logger.info("GPSD restarted successfully")
+                return True
+            else:
+                logger.error("GPSD process not found after restart")
+                return False
+                
         except Exception as e:
-            logger.error(f"Failed to restart gpsd: {e}")
+            logger.error(f"Failed to restart GPSD: {e}")
             return False
 
 class SystemHealth:
@@ -192,31 +255,25 @@ class SystemHealth:
         self.system_healthy = True
         
     def update_heartbeat(self):
-        """Update heartbeat timestamp"""
         self.last_heartbeat_sent = time.time()
         
     def update_compass(self):
-        """Update compass timestamp"""
         self.last_compass_sent = time.time()
         
     def update_gps(self):
-        """Update GPS data timestamp"""
         self.last_gps_data = time.time()
         
     def is_healthy(self):
-        """Check if system is healthy"""
         now = time.time()
         
-        # Check if compass is working (most critical)
         compass_age = now - self.last_compass_sent
-        if compass_age > 30:  # No compass for 30 seconds
+        if compass_age > 30:
             logger.warning(f"Compass not working for {compass_age:.0f}s")
             self.system_healthy = False
             return False
             
-        # Check heartbeat
         heartbeat_age = now - self.last_heartbeat_sent
-        if heartbeat_age > 60:  # No heartbeat for 60 seconds
+        if heartbeat_age > 60:
             logger.warning(f"No heartbeat for {heartbeat_age:.0f}s")
             self.system_healthy = False
             return False
@@ -225,7 +282,6 @@ class SystemHealth:
         return True
     
     def send_watchdog_notification(self):
-        """Send systemd watchdog notification"""
         if SYSTEMD_AVAILABLE and self.is_healthy():
             try:
                 systemd.daemon.notify('WATCHDOG=1')
@@ -238,19 +294,26 @@ class GarminReader:
     
     def __init__(self):
         self.compass = CompassReader()
-        self.device_monitor = DeviceMonitor(DEVICE_PATH)
+        self.gpsd_manager = GPSDManager(DEVICE_PATH)
         self.health = SystemHealth()
         self.running = True
         self.gpsd_connected = False
         self.udp_sock = None
         self.setup_udp_socket()
         
+        # Initialize system on startup
+        self.initialize_system()
+        
+    def initialize_system(self):
+        """Initialize system by cleaning up GPSD conflicts"""
+        logger.info("Initializing GPS system...")
+        self.gpsd_manager.kill_system_gpsd()
+        
     def setup_udp_socket(self):
         """Initialize UDP broadcast socket"""
         try:
             self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            # Set socket buffer size for better performance on Pi
             self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
             logger.info("UDP broadcast socket initialized")
         except Exception as e:
@@ -268,6 +331,13 @@ class GarminReader:
                 return False
         return False
     
+    def calculate_nmea_checksum(self, sentence):
+        """Calculate NMEA checksum"""
+        checksum = 0
+        for char in sentence:
+            checksum ^= ord(char)
+        return checksum
+    
     def compass_broadcast_loop(self):
         """Independent compass broadcast loop - MISSION CRITICAL"""
         logger.info("Starting compass broadcast loop...")
@@ -278,8 +348,6 @@ class GarminReader:
         while self.running:
             try:
                 heading = self.compass.read_compass()
-                
-                # Create NMEA HCHDG sentence with checksum
                 nmea_sentence = f"HCHDG,{heading:.1f},,,,0.0"
                 checksum = self.calculate_nmea_checksum(nmea_sentence)
                 hchdg = f"${nmea_sentence}*{checksum:02X}"
@@ -327,31 +395,25 @@ class GarminReader:
         """Monitor device connection and recover from disconnects"""
         while self.running:
             try:
-                device_present = self.device_monitor.check_device()
+                device_present = self.gpsd_manager.check_device()
                 
-                if not device_present and self.device_monitor.device_present:
-                    logger.warning("USB device disconnected!")
+                if not device_present and self.gpsd_manager.device_present:
+                    logger.warning("GPS device disconnected!")
                     self.gpsd_connected = False
                     
-                elif device_present and not self.device_monitor.device_present:
-                    logger.info("USB device reconnected, restarting gpsd...")
-                    if self.device_monitor.restart_gpsd():
+                elif device_present and not self.gpsd_manager.device_present:
+                    logger.info("GPS device reconnected, performing full GPSD restart...")
+                    if self.gpsd_manager.restart_gpsd():
                         time.sleep(3)
+                        logger.info("GPS recovery completed")
+                    else:
+                        logger.error("GPS recovery failed")
                     
-                self.device_monitor.device_present = device_present
-                
                 time.sleep(DEVICE_CHECK_INTERVAL)
                 
             except Exception as e:
                 logger.error(f"Device monitor error: {e}")
                 time.sleep(DEVICE_CHECK_INTERVAL)
-    
-    def calculate_nmea_checksum(self, sentence):
-        """Calculate NMEA checksum"""
-        checksum = 0
-        for char in sentence:
-            checksum ^= ord(char)
-        return checksum
     
     def connect_to_gpsd(self):
         """Connect to gpsd with timeout and error handling"""
@@ -379,8 +441,8 @@ class GarminReader:
             
             try:
                 # Wait for device to be available
-                while self.running and not self.device_monitor.check_device():
-                    logger.info("Waiting for USB device...")
+                while self.running and not self.gpsd_manager.check_device():
+                    logger.info("Waiting for GPS device...")
                     time.sleep(5)
                 
                 if not self.running:
@@ -389,13 +451,17 @@ class GarminReader:
                 # Connect to gpsd
                 gpsd_sock = self.connect_to_gpsd()
                 if not gpsd_sock:
-                    time.sleep(5)
-                    continue
+                    logger.warning("GPSD connection failed, attempting restart...")
+                    if self.gpsd_manager.restart_gpsd():
+                        time.sleep(3)
+                        continue
+                    else:
+                        time.sleep(5)
+                        continue
                 
                 # Process GPSD data
                 while self.running and self.gpsd_connected:
                     try:
-                        # Use select for non-blocking read with timeout
                         ready = select.select([gpsd_sock], [], [], 1.0)
                         
                         if ready[0]:
@@ -414,21 +480,21 @@ class GarminReader:
                                 if line.startswith("$"):
                                     # Add checksum if missing
                                     if '*' not in line:
-                                        sentence = line[1:]  # Remove $
+                                        sentence = line[1:]
                                         checksum = self.calculate_nmea_checksum(sentence)
                                         line = f"{line}*{checksum:02X}"
                                     
                                     if self.broadcast_message(line):
                                         self.health.update_gps()
-                                        logger.debug(f"[GPSD] {line}")
+                                        logger.info(f"[GPS] {line}")
                         
                         # Check if device is still connected
-                        if not self.device_monitor.check_device():
+                        if not self.gpsd_manager.check_device():
                             logger.warning("Device disconnected during operation")
                             break
                             
                     except socket.timeout:
-                        continue  # Normal timeout, continue loop
+                        continue
                     except Exception as e:
                         logger.error(f"GPSD read error: {e}")
                         break
@@ -452,7 +518,6 @@ class GarminReader:
         logger.info(f"Received signal {signum}, shutting down...")
         self.running = False
         
-        # Notify systemd we're stopping
         if SYSTEMD_AVAILABLE:
             try:
                 systemd.daemon.notify('STOPPING=1')
@@ -461,13 +526,11 @@ class GarminReader:
     
     def run(self):
         """Main execution method"""
-        # Register signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         
-        logger.info("Starting Garmin Reader with compass integration and watchdog...")
+        logger.info("Starting Garmin Reader with enhanced GPSD management...")
         
-        # Notify systemd we're ready
         if SYSTEMD_AVAILABLE:
             try:
                 systemd.daemon.notify('READY=1')
@@ -488,24 +551,19 @@ class GarminReader:
             thread.start()
             logger.info(f"Started {thread.name} thread")
         
-        # Wait a moment for threads to start
         time.sleep(2)
         
         try:
-            # Main thread keeps running until signal received
             while self.running:
-                # Periodic health check
                 if not self.health.is_healthy():
                     logger.warning("System health check failed")
-                
-                time.sleep(10)  # Check every 10 seconds
+                time.sleep(10)
                 
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
         
         self.running = False
         
-        # Wait for threads to finish
         for thread in threads:
             if thread.is_alive():
                 thread.join(timeout=5)
@@ -517,7 +575,6 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit()
     
-    # Check if running as root
     if os.geteuid() != 0:
         logger.error("Must run as root for hardware access")
         sys.exit(1)
