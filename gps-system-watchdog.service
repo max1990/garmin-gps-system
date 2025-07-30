@@ -1,0 +1,16 @@
+[Unit]
+Description=GPS System Ultimate Watchdog - Last Line of Defense
+After=gps-stream.service
+Wants=gps-stream.service
+
+[Service]
+Type=simple
+ExecStart=/home/cuas/system_watchdog.py
+Restart=always
+RestartSec=30
+User=root
+Group=root
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
