@@ -2,12 +2,14 @@
 Description=Hardware Watchdog
 DefaultDependencies=false
 Before=shutdown.target reboot.target halt.target
+ConditionPathExists=/sys/class/watchdog/watchdog0
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'echo 60 > /sys/class/watchdog/watchdog0/timeout && echo V > /sys/class/watchdog/watchdog0/device'
-TimeoutSec=0
+ExecStart=/bin/sh -c 'if [ -w /sys/class/watchdog/watchdog0/timeout ]; then echo 60 > /sys/class/watchdog/watchdog0/timeout; fi && if [ -w /sys/class/watchdog/watchdog0/device ]; then echo V > /sys/class/watchdog/watchdog0/device; fi'
+ExecStop=/bin/sh -c 'if [ -w /sys/class/watchdog/watchdog0/device ]; then echo V > /sys/class/watchdog/watchdog0/device; fi'
+TimeoutSec=10
 
 [Install]
 WantedBy=multi-user.target
