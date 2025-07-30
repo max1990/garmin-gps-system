@@ -5,7 +5,7 @@ Wants=network-online.target
 Requires=network.target
 
 [Service]
-Type=simple
+Type=notify
 ExecStart=/usr/bin/python3 /home/cuas/garminReader.py
 Restart=always
 RestartSec=15
@@ -17,7 +17,7 @@ Environment=PYTHONUNBUFFERED=1
 StandardOutput=journal
 StandardError=journal
 
-# Watchdog settings - systemd will restart if no keepalive received
+# Watchdog settings
 WatchdogSec=60
 NotifyAccess=main
 
@@ -25,10 +25,10 @@ NotifyAccess=main
 MemoryLimit=256M
 CPUQuota=50%
 
-# Ensure I2C and USB permissions
+# Permissions
 SupplementaryGroups=dialout,i2c,gpio
 
-# Kill all child processes when service stops
+# Process management
 KillMode=control-group
 KillSignal=SIGTERM
 TimeoutStopSec=30
