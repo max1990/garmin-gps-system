@@ -1,2 +1,21 @@
-# Hardware watchdog
+# GPS System Optimizations
+# I2C for compass (always enabled)
+dtparam=i2c_arm=on
+dtparam=i2c1=on
+
+# SPI interface (may be useful for future sensors)
+dtparam=spi=on
+
+# Hardware watchdog (only if supported)
 dtparam=watchdog=on
+
+# Performance optimizations for Pi 2
+gpu_mem=16
+disable_splash=1
+boot_delay=0
+
+# USB power management (help with GPS stability)
+max_usb_current=1
+
+# Reduce SD card wear
+disable_poe_fan=1
