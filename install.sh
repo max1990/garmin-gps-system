@@ -202,6 +202,16 @@ fi
 
 log_step "7/9 Setting up permissions and services..."
 
+# Create log directory and set proper permissions
+mkdir -p /var/log
+chmod 755 /var/log
+touch /var/log/garmin_reader.log
+touch /var/log/system_watchdog.log
+chmod 666 /var/log/garmin_reader.log
+chmod 666 /var/log/system_watchdog.log
+chown root:root /var/log/garmin_reader.log
+chown root:root /var/log/system_watchdog.log
+
 # Set file permissions
 chmod +x /home/cuas/*.py /home/cuas/*.sh 2>/dev/null || log_warn "Could not set all file permissions"
 chown root:root /home/cuas/* 2>/dev/null || log_warn "Could not set all file ownership"
@@ -214,9 +224,10 @@ usermod -a -G dialout,i2c,gpio root 2>/dev/null || log_warn "Could not add 'root
 echo "0.0" > /home/cuas/compass_calibration.txt
 echo "0.0" >> /home/cuas/compass_calibration.txt
 
-# Disable conflicting services
-systemctl stop gpsd.socket gpsd 2>/dev/null || true
-systemctl disable gpsd.socket gpsd 2>/dev/null || true
+# Disable conflicting services - be more aggressive
+systemctl stop gpsd.socket gpsd gps-simple.service 2>/dev/null || true
+systemctl disable gpsd.socket gpsd gps-simple.service 2>/dev/null || true
+systemctl mask gpsd.socket gpsd 2>/dev/null || true  # Prevent them from starting
 
 # Enable new services
 systemctl daemon-reload
