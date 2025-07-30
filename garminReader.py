@@ -205,8 +205,6 @@ class GPSDManager:
 
 ### New Code START
     
-# Replace the existing enhanced_restart_gpsd method in your GPSDManager class with this improved version
-
     def enhanced_restart_gpsd(self):
         """
         Enhanced GPSD restart that matches your manual recovery commands
@@ -306,47 +304,47 @@ class GPSDManager:
         except Exception as e:
             logger.error(f"Enhanced restart failed with exception: {e}")
             return False
-        
-        def restart_gpsd(self):
-            """
-            Legacy method - redirects to enhanced restart for backward compatibility
-            This ensures all existing calls work with the improved restart logic
-            """
-            logger.info("Using enhanced restart method for better reliability...")
-            return self.enhanced_restart_gpsd()
-    
-        def verify_gpsd_running(self):
-            """
-            Verify that GPSD is actually running and responding
-            Returns True if GPSD is functional, False otherwise
-            """
+
+    def restart_gpsd(self):
+        """
+        Legacy method - redirects to enhanced restart for backward compatibility
+        This ensures all existing calls work with the improved restart logic
+        """
+        logger.info("Using enhanced restart method for better reliability...")
+        return self.enhanced_restart_gpsd()
+
+    def verify_gpsd_running(self):
+        """
+        Verify that GPSD is actually running and responding
+        Returns True if GPSD is functional, False otherwise
+        """
+        try:
+            # Check if gpsd process exists
+            result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, timeout=5)
+            if result.returncode != 0:
+                logger.warning("No gpsd process found")
+                return False
+            
+            # Try to connect to gpsd to verify it's responding
             try:
-                # Check if gpsd process exists
-                result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, timeout=5)
-                if result.returncode != 0:
-                    logger.warning("No gpsd process found")
-                    return False
+                test_sock = socket.create_connection(('localhost', 2947), timeout=5)
+                test_sock.sendall(b'?VERSION;\n')
+                test_sock.settimeout(3.0)
                 
-                # Try to connect to gpsd to verify it's responding
-                try:
-                    test_sock = socket.create_connection(('localhost', 2947), timeout=5)
-                    test_sock.sendall(b'?VERSION;\n')
-                    test_sock.settimeout(3.0)
-                    
-                    # Try to read response
-                    response = test_sock.recv(1024)
-                    test_sock.close()
-                    
-                    if b'VERSION' in response:
-                        logger.debug("GPSD is running and responding")
-                        return True
-                    else:
-                        logger.warning("GPSD not responding properly")
-                        return False
-                        
-                except Exception as e:
-                    logger.warning(f"GPSD connection test failed: {e}")
+                # Try to read response
+                response = test_sock.recv(1024)
+                test_sock.close()
+                
+                if b'VERSION' in response:
+                    logger.debug("GPSD is running and responding")
+                    return True
+                else:
+                    logger.warning("GPSD not responding properly")
                     return False
+                    
+            except Exception as e:
+                logger.warning(f"GPSD connection test failed: {e}")
+                return False
                 
         except subprocess.TimeoutExpired:
             logger.error("Process check timed out")
