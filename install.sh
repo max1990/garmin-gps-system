@@ -184,6 +184,7 @@ log_step "6/9 Downloading and installing system files..."
 # Download all files with error handling
 download_with_retry "$BASE_URL/garminReader.py" "/home/cuas/garminReader.py" "garminReader.py" || exit 1
 download_with_retry "$BASE_URL/system_watchdog.py" "/home/cuas/system_watchdog.py" "system_watchdog.py" || exit 1
+download_with_retry "$BASE_URL/gps_startup_cleanup.sh" "/home/cuas/gps_startup_cleanup.sh" "gps_startup_cleanup.sh" || exit 1  # ADDED THIS LINE
 download_with_retry "$BASE_URL/run_gps_service.sh" "/home/cuas/run_gps_service.sh" "run_gps_service.sh" || exit 1
 download_with_retry "$BASE_URL/start_gps_broadcaster.sh" "/home/cuas/start_gps_broadcaster.sh" "start_gps_broadcaster.sh" || exit 1
 download_with_retry "$BASE_URL/calibrate_compass.py" "/home/cuas/calibrate_compass.py" "calibrate_compass.py" || exit 1
