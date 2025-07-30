@@ -702,7 +702,7 @@ class GarminReader:
         threads = [
             threading.Thread(target=self.compass_broadcast_loop, daemon=True, name="CompassBroadcast"),
             threading.Thread(target=self.heartbeat_loop, daemon=True, name="Heartbeat"),
-            threading.Thread(target=self.device_monitor_loop, daemon=True, name="DeviceMonitor"),
+            threading.Thread(target=self.enhanced_device_monitor_loop, daemon=True, name="DeviceMonitor"),
             threading.Thread(target=self.gpsd_loop, daemon=True, name="GPSDLoop"),
             threading.Thread(target=self.watchdog_loop, daemon=True, name="WatchdogLoop")
         ]
