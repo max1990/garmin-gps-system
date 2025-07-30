@@ -1,0 +1,13 @@
+[Unit]
+Description=Hardware Watchdog
+DefaultDependencies=false
+Before=shutdown.target reboot.target halt.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo 60 > /sys/class/watchdog/watchdog0/timeout && echo V > /sys/class/watchdog/watchdog0/device'
+TimeoutSec=0
+
+[Install]
+WantedBy=multi-user.target
