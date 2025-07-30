@@ -4,6 +4,7 @@ System Watchdog - Ultimate Backup System Monitor
 - Monitors critical system functions
 - Automatic system restart as last resort
 - Completely independent of main GPS service
+- Handles missing hardware gracefully
 
 Author: Maximilian Leutermann
 Date: 29 July 2025
@@ -20,11 +21,12 @@ from datetime import datetime, timedelta
 # Configuration
 BROADCAST_IP = "192.168.137.255"
 BROADCAST_PORT = 60000
-HEARTBEAT_TIMEOUT = 180  # 3 minutes without heartbeat = problem
-COMPASS_TIMEOUT = 120    # 2 minutes without compass = problem
+HEARTBEAT_TIMEOUT = 300  # 5 minutes without heartbeat = problem (increased tolerance)
+COMPASS_TIMEOUT = 300    # 5 minutes without compass = problem (increased tolerance)
 CHECK_INTERVAL = 30      # Check every 30 seconds
-MAX_FAILURES = 3         # Max consecutive failures before restart
+MAX_FAILURES = 5         # Max consecutive failures before restart (increased tolerance)
 RESTART_COMMAND = "/sbin/reboot"
+GRACE_PERIOD = 300       # 5 minutes grace period on startup
 
 # Logging
 logging.basicConfig(
@@ -43,6 +45,7 @@ class SystemWatchdog:
         self.last_compass = None
         self.failure_count = 0
         self.sock = None
+        self.start_time = datetime.now()
         self.setup_socket()
     
     def setup_socket(self):
@@ -90,33 +93,44 @@ class SystemWatchdog:
         now = datetime.now()
         issues = []
         
-        # Check heartbeat
-        if self.last_heartbeat:
-            heartbeat_age = (now - self.last_heartbeat).total_seconds()
-            if heartbeat_age > HEARTBEAT_TIMEOUT:
-                issues.append(f"No heartbeat for {heartbeat_age:.0f}s")
-        else:
-            issues.append("No heartbeat received yet")
+        # Grace period - don't check for first 5 minutes
+        if (now - self.start_time).total_seconds() < GRACE_PERIOD:
+            logger.debug(f"Grace period active - {GRACE_PERIOD - (now - self.start_time).total_seconds():.0f}s remaining")
+            return
         
-        # Check compass (mission critical)
-        if self.last_compass:
-            compass_age = (now - self.last_compass).total_seconds()
-            if compass_age > COMPASS_TIMEOUT:
-                issues.append(f"No compass data for {compass_age:.0f}s")
-        else:
-            issues.append("No compass data received yet")
-        
-        # Check GPS service
+        # Check GPS service (most important - if service is down, that's critical)
         if not self.is_service_running("gps-stream.service"):
             issues.append("GPS service not running")
+        else:
+            # Only check data streams if service is running
+            service_start_time = self.get_service_start_time("gps-stream.service")
+            if service_start_time:
+                service_age = (now - service_start_time).total_seconds()
+                
+                # Allow service some time to start broadcasting
+                if service_age > 60:  # Service has been running for more than 1 minute
+                    # Check heartbeat (should always work)
+                    if self.last_heartbeat:
+                        heartbeat_age = (now - self.last_heartbeat).total_seconds()
+                        if heartbeat_age > HEARTBEAT_TIMEOUT:
+                            issues.append(f"No heartbeat for {heartbeat_age:.0f}s")
+                    else:
+                        issues.append("No heartbeat received yet (service running but not broadcasting)")
+                    
+                    # Check compass (only if we expect it to work)
+                    # Don't fail if compass hardware is not connected
+                    if self.last_compass:
+                        compass_age = (now - self.last_compass).total_seconds()
+                        if compass_age > COMPASS_TIMEOUT:
+                            logger.warning(f"No compass data for {compass_age:.0f}s (hardware may be disconnected)")
+                            # Don't add to issues - compass hardware may not be connected
+                else:
+                    logger.debug(f"Service starting up - {service_age:.0f}s old")
         
-        # Check USB device
-        if not os.path.exists("/dev/ttyUSB0"):
-            issues.append("USB device missing")
-        
-        # Check I2C (for compass)
+        # Check for critical system issues (these are always problems)
         if not os.path.exists("/dev/i2c-1"):
-            issues.append("I2C bus missing")
+            logger.warning("I2C bus missing (compass will not work)")
+            # Don't fail for this - I2C might be disabled if no compass hardware
         
         # Evaluate health
         if issues:
@@ -142,11 +156,43 @@ class SystemWatchdog:
         except Exception:
             return False
     
+    def get_service_start_time(self, service_name):
+        """Get when a service was started"""
+        try:
+            result = subprocess.run(
+                ['systemctl', 'show', service_name, '--property=ActiveEnterTimestamp'],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                timestamp_str = result.stdout.strip().split('=')[1]
+                if timestamp_str and timestamp_str != "n/a":
+                    # Parse systemd timestamp format
+                    return datetime.strptime(timestamp_str.split()[0] + " " + timestamp_str.split()[1], 
+                                           "%Y-%m-%d %H:%M:%S")
+        except Exception as e:
+            logger.debug(f"Could not get service start time: {e}")
+        return None
+    
     def emergency_restart(self):
         """Last resort - restart the entire system"""
         logger.critical("EMERGENCY RESTART INITIATED - System health critical")
         logger.critical("All recovery attempts have failed")
         logger.critical("Executing system restart in 10 seconds...")
+        
+        # Try to restart the GPS service first as a last attempt
+        try:
+            logger.info("Attempting final service restart before system reboot...")
+            subprocess.run(['systemctl', 'restart', 'gps-stream.service'], timeout=10)
+            time.sleep(5)
+            
+            # Quick check if service is now running
+            if self.is_service_running("gps-stream.service"):
+                logger.info("Service restart successful, canceling system reboot")
+                self.failure_count = 0
+                return
+        except Exception as e:
+            logger.error(f"Final service restart failed: {e}")
         
         # Give time for log to be written
         time.sleep(10)
@@ -166,8 +212,10 @@ class SystemWatchdog:
         """Main watchdog loop"""
         logger.info("System Watchdog started - Ultimate backup monitoring")
         logger.info(f"Heartbeat timeout: {HEARTBEAT_TIMEOUT}s")
-        logger.info(f"Compass timeout: {COMPASS_TIMEOUT}s")
+        logger.info(f"Compass timeout: {COMPASS_TIMEOUT}s (warning only)")
         logger.info(f"Max failures before restart: {MAX_FAILURES}")
+        logger.info(f"Grace period: {GRACE_PERIOD}s")
+        logger.info("NOTE: System is designed to work without compass/GPS hardware")
         
         self.monitor_broadcasts()
 
