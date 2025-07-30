@@ -29,6 +29,29 @@ log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
 }
 
+# Function to download with retries - MUST BE DEFINED FIRST
+download_with_retry() {
+    local url="$1"
+    local output="$2"
+    local description="$3"
+    local retries=3
+    
+    for i in $(seq 1 $retries); do
+        if wget -q --timeout=30 -O "$output" "$url"; then
+            log_info "✅ $description"
+            return 0
+        else
+            if [ $i -lt $retries ]; then
+                log_warn "Download failed, retrying ($i/$retries)..."
+                sleep 2
+            fi
+        fi
+    done
+    
+    log_error "❌ Failed to download $description after $retries attempts"
+    return 1
+}
+
 # Banner
 echo -e "${BLUE}"
 echo "=============================================================="
@@ -57,7 +80,7 @@ BASE_URL="https://raw.githubusercontent.com/$GITHUB_USER/$REPO_NAME/main"
 
 # Fix system clock FIRST - this is critical
 log_step "0/9 Fixing system clock (CRITICAL)..."
-log_info "Current (wrong) date: $(date)"
+log_info "Current date: $(date)"
 
 # Force set date to a reasonable time if it's clearly wrong
 CURRENT_YEAR=$(date +%Y)
@@ -157,29 +180,6 @@ mkdir -p /var/log
 chmod 755 /home/cuas /var/log
 
 log_step "6/9 Downloading and installing system files..."
-
-# Function to download with retries
-download_with_retry() {
-    local url="$1"
-    local output="$2"
-    local description="$3"
-    local retries=3
-    
-    for i in $(seq 1 $retries); do
-        if wget -q --timeout=30 -O "$output" "$url"; then
-            log_info "✅ $description"
-            return 0
-        else
-            if [ $i -lt $retries ]; then
-                log_warn "Download failed, retrying ($i/$retries)..."
-                sleep 2
-            fi
-        fi
-    done
-    
-    log_error "❌ Failed to download $description after $retries attempts"
-    return 1
-}
 
 # Download all files with error handling
 download_with_retry "$BASE_URL/garminReader.py" "/home/cuas/garminReader.py" "garminReader.py" || exit 1
@@ -281,7 +281,20 @@ done
 
 if [ "$ALL_GOOD" = false ]; then
     log_error "Installation verification failed - some critical files are missing"
-    exit 1
+    log_info "Trying to re-download missing files..."
+    
+    # Try to re-download missing files
+    if [ ! -f "/home/cuas/system_watchdog.py" ] || [ ! -s "/home/cuas/system_watchdog.py" ]; then
+        log_info "Re-downloading system_watchdog.py..."
+        download_with_retry "$BASE_URL/system_watchdog.py" "/home/cuas/system_watchdog.py" "system_watchdog.py (retry)"
+    fi
+    
+    if [ ! -f "/etc/systemd/system/gps-system-watchdog.service" ] || [ ! -s "/etc/systemd/system/gps-system-watchdog.service" ]; then
+        log_info "Re-downloading gps-system-watchdog.service..."
+        download_with_retry "$BASE_URL/gps-system-watchdog.service" "/etc/systemd/system/gps-system-watchdog.service" "gps-system-watchdog.service (retry)"
+        systemctl daemon-reload
+        systemctl enable gps-system-watchdog.service || log_warn "Could not enable gps-system-watchdog.service after retry"
+    fi
 fi
 
 # Test Python imports
@@ -307,11 +320,29 @@ except ImportError:
     print('⚠️ systemd module not available (watchdog notifications disabled)')
 "
 
+# Final file check
+log_info "Final verification..."
+ALL_GOOD=true
+for file in "${CRITICAL_FILES[@]}"; do
+    if [ -f "$file" ] && [ -s "$file" ]; then
+        log_info "✅ $file"
+    else
+        log_error "❌ Still missing: $file"
+        ALL_GOOD=false
+    fi
+done
+
 # Success message
 echo ""
-echo -e "${GREEN}=============================================================="
-echo "✅ Installation Complete!"
-echo "==============================================================${NC}"
+if [ "$ALL_GOOD" = true ]; then
+    echo -e "${GREEN}=============================================================="
+    echo "✅ Installation Complete!"
+    echo "==============================================================${NC}"
+else
+    echo -e "${YELLOW}=============================================================="
+    echo "⚠️ Installation Mostly Complete (with some warnings)"
+    echo "==============================================================${NC}" 
+fi
 echo ""
 echo "🔧 What was installed:"
 echo "   • GPS broadcasting system with compass integration"
@@ -355,5 +386,5 @@ echo "   Connect GPS and compass when ready - system will detect them"
 echo ""
 echo "🆘 Support: Check the GitHub repository for documentation"
 echo ""
-log_info "Installation completed successfully!"
+log_info "Installation completed!"
 log_warn "REBOOT REQUIRED: sudo reboot"
