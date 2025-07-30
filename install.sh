@@ -2,7 +2,7 @@
 
 # GPS System Easy Installer for Raspberry Pi
 # Author: Maximilian Leutermann
-# Usage: curl -fsSL https://raw.githubusercontent.com/YOUR-USERNAME/garmin-gps-system/main/install.sh | sudo bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/install.sh | sudo bash
 
 set -e
 
@@ -42,7 +42,7 @@ echo ""
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     log_error "Please run with sudo:"
-    echo "curl -fsSL https://raw.githubusercontent.com/YOUR-USERNAME/garmin-gps-system/main/install.sh | sudo bash"
+    echo "curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/install.sh | sudo bash"
     exit 1
 fi
 
