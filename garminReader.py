@@ -486,9 +486,26 @@ class GarminReader:
         self.initialize_system()
         
     def initialize_system(self):
-        """Initialize system by cleaning up GPSD conflicts"""
+        """Initialize system by cleaning up GPSD conflicts and starting fresh GPSD"""
         logger.info("Initializing GPS system...")
+        
+        # Only do basic cleanup - the startup script already did the heavy lifting
         self.gpsd_manager.kill_system_gpsd()
+        
+        # Wait a moment for cleanup to complete
+        time.sleep(2)
+        
+        # Start a fresh GPSD instance if device is present
+        if self.gpsd_manager.check_device():
+            logger.info("Starting fresh GPSD instance...")
+            if self.gpsd_manager.start_gpsd_instance():
+                logger.info("GPSD started successfully during initialization")
+            else:
+                logger.warning("Failed to start GPSD during initialization - will retry in main loop")
+        else:
+            logger.warning("GPS device not present during initialization")
+        
+        logger.info("GPS system initialization complete")
         
     def setup_udp_socket(self):
         """Initialize UDP broadcast socket"""
