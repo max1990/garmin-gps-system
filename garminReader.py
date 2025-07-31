@@ -362,6 +362,11 @@ class GPSDManager:
             logger.error(f"Cannot start GPSD: device {self.device_path} not present")
             return False
         
+        # First check if GPSD is already running and functional
+        if self.verify_gpsd_running():
+            logger.info("GPSD already running and functional, no need to start new instance")
+            return True
+        
         try:
             logger.info(f"Starting gpsd for device {self.device_path}...")
             
@@ -400,12 +405,24 @@ class GPSDManager:
             else:
                 # Process died immediately
                 stdout, stderr = process.communicate()
-                logger.error(f"GPSD failed to start: {stderr}")
+                logger.error(f"GPSD failed to start: {stderr.strip()}")
+                # Common error cases
+                if "Address already in use" in stderr:
+                    logger.warning("GPSD socket already in use - checking if existing instance is functional")
+                    return self.verify_gpsd_running()
+                elif "Device or resource busy" in stderr:
+                    logger.warning("GPS device already in use - checking if existing instance is functional")
+                    return self.verify_gpsd_running()
                 return False
                 
         except Exception as e:
             logger.error(f"Exception starting GPSD: {e}")
+            # If there was an exception, check if GPSD is working anyway
+            if self.verify_gpsd_running():
+                logger.info("Despite exception, GPSD appears to be functional")
+                return True
             return False
+
 
 # New Code END
 
