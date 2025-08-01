@@ -582,7 +582,7 @@ class GarminReader:
         self.setup_udp_socket()
         
         # Initialize system on startup
-        self.initialize_system()
+        self.simple_initialize_system()
 
     def simple_initialize_system(self):
         """Simple system initialization"""
