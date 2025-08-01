@@ -150,15 +150,16 @@ class CompassReader:
         with self.lock:
             return self.heading
 
+"""
 class GPSDManager:
-    """Enhanced GPSD manager that handles system conflicts and recovery"""
+    #Enhanced GPSD manager that handles system conflicts and recovery
     
     def __init__(self, device_path):
         self.device_path = device_path
         self.device_present = False
         
     def kill_system_gpsd(self):
-        """Completely stop system GPSD services that conflict with ours"""
+        #Completely stop system GPSD services that conflict with ours
         try:
             logger.info("Stopping system GPSD services...")
             
@@ -190,7 +191,7 @@ class GPSDManager:
             return False
     
     def check_device(self):
-        """Check if GPS device is present"""
+        #Check if GPS device is present
         present = os.path.exists(self.device_path)
         
         # Log device state changes
@@ -206,10 +207,9 @@ class GPSDManager:
 ### New Code START
     
     def enhanced_restart_gpsd(self):
-        """
-        Enhanced GPSD restart that matches your manual recovery commands
-        This implements the exact sequence you run manually for maximum robustness
-        """
+        # Enhanced GPSD restart that matches your manual recovery commands
+        # This implements the exact sequence you run manually for maximum robustness
+        
         try:
             logger.info("Performing enhanced GPSD restart (full system cleanup)...")
             
@@ -306,18 +306,16 @@ class GPSDManager:
             return False
 
     def restart_gpsd(self):
-        """
-        Legacy method - redirects to enhanced restart for backward compatibility
-        This ensures all existing calls work with the improved restart logic
-        """
+        # Legacy method - redirects to enhanced restart for backward compatibility
+        # This ensures all existing calls work with the improved restart logic
+        
         logger.info("Using enhanced restart method for better reliability...")
         return self.enhanced_restart_gpsd()
 
     def verify_gpsd_running(self):
-        """
-        Verify that GPSD is actually running and responding
-        Returns True if GPSD is functional, False otherwise
-        """
+        # Verify that GPSD is actually running and responding
+        # Returns True if GPSD is functional, False otherwise
+        
         try:
             # Check if gpsd process exists
             result = subprocess.run(['pgrep', 'gpsd'], capture_output=True, timeout=5)
@@ -354,10 +352,9 @@ class GPSDManager:
             return False
 
     def start_gpsd_instance(self):
-        """
-        Start a new GPSD instance with proper error handling
-        This method is called by enhanced_restart_gpsd
-        """
+        # Start a new GPSD instance with proper error handling
+        # This method is called by enhanced_restart_gpsd
+        
         if not self.check_device():
             logger.error(f"Cannot start GPSD: device {self.device_path} not present")
             return False
@@ -422,9 +419,111 @@ class GPSDManager:
                 logger.info("Despite exception, GPSD appears to be functional")
                 return True
             return False
-
-
 # New Code END
+"""
+
+class SimpleGPSDManager:
+    def __init__(self, device_path="/dev/ttyUSB0"):
+        self.device_path = device_path
+        self.device_present = False
+        
+    def check_device(self):
+        """Check if GPS device is present"""
+        present = os.path.exists(self.device_path)
+        if present != self.device_present:
+            if present:
+                logger.info(f"GPS device {self.device_path} connected")
+            else:
+                logger.warning(f"GPS device {self.device_path} disconnected")
+        self.device_present = present
+        return present
+
+    def simple_restart_gpsd(self):
+        """
+        Simple GPSD restart using the EXACT approach that worked in your test
+        No complex cleanup, no multiple scripts, just the working method
+        """
+        try:
+            logger.info("Starting simple GPSD restart...")
+            
+            # Step 1: Kill all GPSD (simple approach)
+            logger.info("Stopping all GPSD processes...")
+            subprocess.run(['sudo', 'pkill', '-f', 'gpsd'], check=False)
+            time.sleep(2)
+            
+            # Step 2: Clean up sockets (simple approach)
+            logger.info("Cleaning up sockets...")
+            for socket_path in ['/var/run/gpsd.sock', '/tmp/gpsd.sock']:
+                try:
+                    if os.path.exists(socket_path):
+                        os.remove(socket_path)
+                except:
+                    pass
+            
+            # Step 3: Check device
+            if not self.check_device():
+                logger.error(f"Device {self.device_path} not present")
+                return False
+                
+            # Step 4: Fix permissions (just like the test)
+            subprocess.run(['sudo', 'chmod', '666', self.device_path], check=False)
+            
+            # Step 5: Start GPSD with EXACT same command that worked
+            logger.info("Starting GPSD...")
+            cmd = ['sudo', 'gpsd', '-n', '-N', '-F', '/tmp/gpsd.sock', self.device_path]
+            
+            # Start in background
+            process = subprocess.Popen(cmd)
+            
+            # Give it time to start (just like the test)
+            time.sleep(5)
+            
+            # Step 6: Verify it's working (just like the test)
+            if self.test_gpsd_connection():
+                logger.info("✅ GPSD started successfully and is responding")
+                return True
+            else:
+                logger.error("❌ GPSD started but not responding")
+                # Kill the non-working process
+                subprocess.run(['sudo', 'pkill', '-f', 'gpsd'], check=False)
+                return False
+                
+        except Exception as e:
+            logger.error(f"Simple GPSD restart failed: {e}")
+            return False
+
+    def test_gpsd_connection(self):
+        """
+        Test GPSD connection - exactly like the working test script
+        """
+        try:
+            # Try to connect (just like the test)
+            sock = socket.create_connection(('localhost', 2947), timeout=10)
+            sock.sendall(b'?WATCH={"enable":true,"nmea":true,"raw":1}\n')
+            sock.settimeout(3.0)
+            
+            # Try to read some data
+            buffer = ""
+            for i in range(10):  # Short test
+                try:
+                    data = sock.recv(4096).decode('utf-8', errors='ignore')
+                    buffer += data
+                    
+                    # Look for any NMEA or JSON response
+                    if '$' in buffer or '"class":"VERSION"' in buffer:
+                        sock.close()
+                        return True
+                        
+                except socket.timeout:
+                    pass
+                time.sleep(0.1)
+            
+            sock.close()
+            return False
+            
+        except Exception as e:
+            logger.debug(f"GPSD connection test failed: {e}")
+            return False
 
 class SystemHealth:
     """System health monitoring and watchdog notifications"""
@@ -475,7 +574,7 @@ class GarminReader:
     
     def __init__(self):
         self.compass = CompassReader()
-        self.gpsd_manager = GPSDManager(DEVICE_PATH)
+        self.gpsd_manager = SimpleGPSDManager(DEVICE_PATH)
         self.health = SystemHealth()
         self.running = True
         self.gpsd_connected = False
@@ -484,9 +583,22 @@ class GarminReader:
         
         # Initialize system on startup
         self.initialize_system()
+
+    def simple_initialize_system(self):
+        """Simple system initialization"""
+        logger.info("Initializing GPS system...")
         
+        # Just start GPSD - no complex cleanup
+        if self.gpsd_manager.simple_restart_gpsd():
+            logger.info("✅ GPS system initialized successfully")
+        else:
+            logger.warning("⚠️ GPS initialization failed - will retry in main loop")
+        
+        logger.info("GPS system initialization complete")
+
+    """
     def initialize_system(self):
-        """Initialize system by cleaning up GPSD conflicts and starting fresh GPSD"""
+        # Initialize system by cleaning up GPSD conflicts and starting fresh GPSD
         logger.info("Initializing GPS system...")
         
         # Only do basic cleanup - the startup script already did the heavy lifting
@@ -506,7 +618,8 @@ class GarminReader:
             logger.warning("GPS device not present during initialization")
         
         logger.info("GPS system initialization complete")
-        
+    """
+
     def setup_udp_socket(self):
         """Initialize UDP broadcast socket"""
         try:
@@ -609,7 +722,7 @@ class GarminReader:
                     
                     if consecutive_failures >= max_failures:
                         logger.error(f"Device failed {consecutive_failures} times, triggering full recovery")
-                        if self.gpsd_manager.enhanced_restart_gpsd():
+                        if self.gpsd_manager.simple_restart_gpsd():
                             consecutive_failures = 0
                             logger.info("Enhanced recovery completed successfully")
                         else:
@@ -622,7 +735,7 @@ class GarminReader:
                 # Device reconnected
                 elif device_present and not self.gpsd_manager.device_present:
                     logger.info("GPS device reconnected! Performing enhanced restart...")
-                    if self.gpsd_manager.enhanced_restart_gpsd():
+                    if self.gpsd_manager.simple_restart_gpsd():
                         consecutive_failures = 0
                         time.sleep(5)
                         logger.info("Device reconnection recovery completed")
