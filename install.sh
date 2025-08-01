@@ -99,7 +99,7 @@ fi
 
 if command -v ntpdate >/dev/null 2>&1; then
     # Try multiple NTP servers
-    for server in "pool.ntp.org" "time.nist.gov" "time.google.com" "0.pool.ntp.org"; do
+    for server in "time.nist.gov" "pool.ntp.org" "time.google.com" "0.pool.ntp.org"; do
         if ntpdate -s "$server" 2>/dev/null; then
             log_info "Time synced with $server"
             break
