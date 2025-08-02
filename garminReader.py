@@ -63,7 +63,17 @@ class GarminDeviceDetector:
     def __init__(self):
         self.detected_device = None
         self.last_detection_time = 0
-        
+        # Check environment variable first (from EnvironmentFile)
+        self.env_device_path = os.environ.get('GARMIN_DEVICE_PATH', None)
+
+    def wait_for_device_ready(self, device_path, timeout=30):
+        """Wait for device to be actually ready for communication"""
+        for i in range(timeout):
+            if os.path.exists(device_path) and os.access(device_path, os.R_OK | os.W_OK):
+                return True
+            time.sleep(1)
+        return False
+    
     def find_garmin_device(self):
         """Find Garmin device by USB vendor/product ID"""
         logger.info("Scanning for Garmin Montana 710 devices...")
@@ -305,6 +315,11 @@ class EnhancedGPSDManager:
                 logger.error(f"Device {device_path} not found")
                 return False
             
+            # Step 3a: Wait for device to be actually ready
+            if not self.device_detector.wait_for_device_ready(device_path, timeout=15):
+                logger.error(f"Device {device_path} exists but is not ready for communication")
+                return False
+            
             subprocess.run(['sudo', 'chmod', '666', device_path], check=False)
             logger.debug(f"Set permissions for {device_path}")
             
@@ -440,6 +455,12 @@ class GarminReader:
         device_path = self.gpsd_manager.get_device_path()
         if device_path:
             logger.info(f"✅ Garmin device detected: {device_path}")
+            
+            # Verify device is actually ready for use
+            if self.gpsd_manager.device_detector.wait_for_device_ready(device_path, timeout=10):
+                logger.info(f"✅ Garmin device ready for communication: {device_path}")
+            else:
+                logger.warning(f"⚠️ Garmin device detected but not ready: {device_path}")
         else:
             logger.error("❌ No Garmin device found - GPS functionality disabled")
         
@@ -733,3 +754,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
