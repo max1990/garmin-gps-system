@@ -15,10 +15,9 @@ Mission-critical GPS and compass broadcasting system for Raspberry Pi with autom
 
 Before installation, test if your Garmin Montana 710 is properly detected:
 
-```bash
 # Download and run the hardware test
 curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/test_garmin_detection.sh | sudo bash
-'''bash
+
 
 ## Quick Installation
 
@@ -26,4 +25,3 @@ Run this single command on your Raspberry Pi:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/install.sh | sudo bash
-'''bash
