@@ -1,31 +1,42 @@
 [Unit]
-Description=Garmin GPS Broadcaster Service with Compass and Watchdog
+Description=Enhanced Garmin GPS Broadcaster with Auto-Detection
 After=network-online.target
 Wants=network-online.target
 Before=gpsd.service
 Conflicts=gpsd.service gpsd.socket
 
 [Service]
-Type=simple
+Type=notify
 ExecStartPre=/home/cuas/gps_startup_cleanup.sh
 ExecStart=/usr/bin/python3 /home/cuas/garminReader.py
 WorkingDirectory=/home/cuas
 User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
+
+# Enhanced restart behavior
 Restart=always
 RestartSec=15
-StartLimitBurst=10
-StandardOutput=journal
-StandardError=journal
+StartLimitBurst=5
+StartLimitIntervalSec=300
 
-# Resource limits for Pi 2 - Fixed: Use MemoryMax instead of MemoryLimit
+# Watchdog configuration
+WatchdogSec=60
+NotifyAccess=main
+
+# Resource limits for Pi 2
 MemoryMax=256M
 
 # Process management
 KillMode=control-group
 KillSignal=SIGTERM
+TimeoutStartSec=120
 TimeoutStopSec=30
+
+# Enhanced logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gps-stream
 
 [Install]
 WantedBy=multi-user.target
