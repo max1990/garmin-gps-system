@@ -75,35 +75,20 @@ class GarminDeviceDetector:
         return False
     
     def find_garmin_device(self):
-        """Find Garmin device by USB vendor/product ID"""
-        logger.info("Scanning for Garmin Montana 710 devices...")
-        
-        # First check environment variable (from EnvironmentFile)
-        if self.env_device_path and os.path.exists(self.env_device_path):
-            logger.info(f"✅ Using environment-specified Garmin device: {self.env_device_path}")
-            self.detected_device = self.env_device_path
-            self.last_detection_time = time.time()
-            return self.env_device_path
-        
-        # REMOVED: /tmp/garmin_device_path check - no longer needed
-        # Direct USB scanning for Garmin devices
-        for device_path in glob.glob("/dev/ttyUSB*"):
-            if self._is_garmin_device(device_path):
-                logger.info(f"✅ Found Garmin Montana 710 at {device_path}")
-                self.detected_device = device_path
+        """Get Garmin device path from environment (set by startup script)"""
+        # ONLY check environment variable - no fallback detection
+        if self.env_device_path:
+            if os.path.exists(self.env_device_path):
+                logger.info(f"✅ Using Garmin device: {self.env_device_path}")
+                self.detected_device = self.env_device_path
                 self.last_detection_time = time.time()
-                
-                # Set proper permissions
-                try:
-                    subprocess.run(['sudo', 'chmod', '666', device_path], check=False)
-                    logger.info(f"Set permissions for {device_path}")
-                except Exception as e:
-                    logger.warning(f"Could not set permissions for {device_path}: {e}")
-                
-                return device_path
-        
-        logger.error("❌ No Garmin Montana 710 device found")
-        return None
+                return self.env_device_path
+            else:
+                logger.error(f"❌ Environment device {self.env_device_path} does not exist")
+                return None
+        else:
+            logger.error("❌ GARMIN_DEVICE_PATH not set in environment")
+            return None
     
     def _is_garmin_device(self, device_path):
         """Check if device is a Garmin by vendor/product ID"""
@@ -153,11 +138,8 @@ class GarminDeviceDetector:
     
     def get_device_path(self):
         """Get current detected device path"""
-        # Re-scan if detection is old or device missing
-        if (not self.detected_device or 
-            not os.path.exists(self.detected_device) or 
-            time.time() - self.last_detection_time > 30):
-            
+        # Only re-read environment if we don't have a device
+        if not self.detected_device:
             self.find_garmin_device()
         
         return self.detected_device
@@ -749,5 +731,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
