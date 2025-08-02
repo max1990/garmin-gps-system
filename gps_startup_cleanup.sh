@@ -14,72 +14,46 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Function to find Garmin device by USB vendor/product ID
+# Function to find Garmin device by testing USB0-USB10 - ITERATIVE APPROACH ONLY CHECKS USB0-USB10
 find_garmin_device() {
     log "=== Garmin Device Detection ==="
     
-    # Check each ttyUSB device for Garmin vendor/product ID
-    for device in /dev/ttyUSB*; do
+    # Try USB devices 0-10
+    for i in {0..10}; do
+        device="/dev/ttyUSB$i"
+        
         if [ -c "$device" ]; then
-            log "Checking device: $device"
+            log "Testing device: $device"
             
-            # Use sysfs method (more reliable than udevadm)
-            device_num=$(basename "$device" | sed 's/ttyUSB//')
-            usb_path="/sys/class/tty/ttyUSB${device_num}/device"
+            # Kill any existing GPSD
+            pkill -f gpsd >/dev/null 2>&1
+            rm -f /var/run/gpsd.sock /tmp/gpsd.sock /var/run/gpsd.pid /tmp/gpsd.pid
+            sleep 2
             
-            if [ -d "$usb_path" ]; then
-                # Walk up the device tree to find USB info
-                current_path="$usb_path"
-                vendor_id=""
-                product_id=""
-                
-                for i in {1..5}; do
-                    if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
-                        vendor_id=$(cat "$current_path/idVendor" 2>/dev/null)
-                        product_id=$(cat "$current_path/idProduct" 2>/dev/null)
-                        break
-                    fi
-                    current_path=$(dirname "$current_path")
-                    if [ "$current_path" = "/" ]; then
-                        break
-                    fi
-                done
-                
-                log "Device $device: Vendor=$vendor_id, Product=$product_id"
-                
-                # Check if this is a Garmin Montana 710 (vendor 091e, product 0003)
-                if [ "$vendor_id" = "091e" ] && [ "$product_id" = "0003" ]; then
-                    log "✅ Found Garmin Montana 710 at $device"
-                    
-                    # Set proper permissions
-                    chmod 666 "$device" || log "Warning: Could not set permissions on $device"
-                    
-                    log "Garmin device configured: $device"
-                    detected_device="$device"  # Set the GLOBAL variable
-                    return 0
-                else
-                    log "Device $device is not a Garmin Montana 710"
-                fi
+            # Set permissions and start GPSD
+            chmod 666 "$device"
+            gpsd -n -N -F /tmp/gpsd.sock "$device" >/dev/null 2>&1 &
+            local gpsd_pid=$!
+            sleep 3
+            
+            # Test if it works
+            if timeout 5 bash -c "echo '?WATCH={\"enable\":true,\"nmea\":true}' | nc localhost 2947 2>/dev/null | grep -q 'GPGGA\|GPRMC\|Garmin'" 2>/dev/null; then
+                log "✅ Found working Garmin at $device"
+                detected_device="$device"
+                # Leave GPSD running - don't kill it!
+                return 0
             else
-                log "No USB info found for $device"
+                log "❌ No GPS data from $device"
+                kill $gpsd_pid 2>/dev/null
+                pkill -f gpsd >/dev/null 2>&1
             fi
+        else
+            log "Device $device does not exist"
         fi
     done
     
-    log "❌ No Garmin device found with vendor ID 091e and product ID 0003"
-    
-    # Fallback: if no specific Garmin found, try /dev/ttyUSB0 if it exists
-    if [ -c "/dev/ttyUSB0" ]; then
-        log "❌ CRITICAL: No Garmin detected, using UNSAFE fallback /dev/ttyUSB0"
-        log "⚠️ This device may NOT be a Garmin Montana 710!"
-        log "⚠️ GPS functionality may not work correctly!"
-        detected_device="/dev/ttyUSB0"  # Set the GLOBAL variable
-        chmod 666 "$detected_device" || log "Warning: Could not set permissions on $detected_device"
-        return 0
-    else
-        log "❌ CRITICAL: No USB devices found at all"
-        return 1
-    fi
+    log "❌ No working Garmin device found on USB0-USB10"
+    return 1
 }
 
 # Enhanced GPSD cleanup with verification
