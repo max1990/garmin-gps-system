@@ -9,6 +9,7 @@ Conflicts=gpsd.service gpsd.socket
 Type=notify
 ExecStartPre=/home/cuas/gps_startup_cleanup.sh
 ExecStart=/usr/bin/python3 /home/cuas/garminReader.py
+ExecStartPost=/home/cuas/start_garmin_gps.sh
 WorkingDirectory=/home/cuas
 User=root
 Group=root
