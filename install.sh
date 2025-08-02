@@ -294,19 +294,19 @@ done
 log_info "Testing Python dependencies..."
 python3 -c "
 import socket, time, threading, logging, subprocess, os, signal, sys, select, glob
-print('        ✅ Core Python modules available')
+print('       ✅ Core Python modules available')
 
 try:
     import smbus
-    print('        ✅ smbus module available')
+    print('       ✅ smbus module available')
 except ImportError:
-    print('        ⚠️ smbus module not available (compass may not work)')
+    print('       ⚠️ smbus module not available (compass may not work)')
 
 try:
     import systemd.daemon
-    print('        ✅ systemd module available')
+    print('       ✅ systemd module available')
 except ImportError:
-    print('        ⚠️ systemd module not available (notifications disabled)')
+    print('       ⚠️ systemd module not available (notifications disabled)')
 "
 
 # Final hardware check
