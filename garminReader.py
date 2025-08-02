@@ -1,9 +1,11 @@
 """
+
 garminReader: UDP rebroadcaster for Garmin NMEA Data with Compass Integration
-Enhanced with proper GPSD conflict resolution and robust USB recovery
+Enhanced with automatic Garmin device detection and robust GPSD management
 
 Author:		Maximilian Leutermann
-Date:		29 July 2025
+Date:		30 July 2025
+
 """
 
 import socket
@@ -16,6 +18,7 @@ import signal
 import sys
 from queue import Queue, Empty
 import select
+import glob
 
 # For systemd watchdog notifications
 try:
@@ -32,9 +35,12 @@ HEARTBEAT_INTERVAL = 10
 HEADING_INTERVAL = 1
 GPSD_HOST = "localhost"
 GPSD_PORT = 2947
-DEVICE_PATH = "/dev/ttyUSB0"
 DEVICE_CHECK_INTERVAL = 5
 WATCHDOG_INTERVAL = 30
+
+# Garmin device identification
+GARMIN_VENDOR_ID = "091e"
+GARMIN_PRODUCT_ID = "0003"
 
 # Compass I2C configuration
 I2C_BUS = 1
@@ -50,6 +56,106 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+class GarminDeviceDetector:
+    """Handles automatic detection of Garmin Montana 710 devices"""
+    
+    def __init__(self):
+        self.detected_device = None
+        self.last_detection_time = 0
+        
+    def find_garmin_device(self):
+        """Find Garmin device by USB vendor/product ID"""
+        logger.info("Scanning for Garmin Montana 710 devices...")
+        
+        # First check if startup script already detected device
+        if os.path.exists("/tmp/garmin_device_path"):
+            try:
+                with open("/tmp/garmin_device_path", "r") as f:
+                    device_path = f.read().strip()
+                    if os.path.exists(device_path):
+                        logger.info(f"✅ Using pre-detected Garmin device: {device_path}")
+                        self.detected_device = device_path
+                        self.last_detection_time = time.time()
+                        return device_path
+            except Exception as e:
+                logger.warning(f"Could not read pre-detected device: {e}")
+        
+        # Scan for Garmin devices
+        for device_path in glob.glob("/dev/ttyUSB*"):
+            if self._is_garmin_device(device_path):
+                logger.info(f"✅ Found Garmin Montana 710 at {device_path}")
+                self.detected_device = device_path
+                self.last_detection_time = time.time()
+                
+                # Set proper permissions
+                try:
+                    subprocess.run(['sudo', 'chmod', '666', device_path], check=False)
+                    logger.info(f"Set permissions for {device_path}")
+                except Exception as e:
+                    logger.warning(f"Could not set permissions for {device_path}: {e}")
+                
+                return device_path
+        
+        logger.error("❌ No Garmin Montana 710 device found")
+        return None
+    
+    def _is_garmin_device(self, device_path):
+        """Check if device is a Garmin by vendor/product ID"""
+        try:
+            # Extract device number (e.g., ttyUSB0 -> 0)
+            device_num = os.path.basename(device_path).replace("ttyUSB", "")
+            
+            # Path to USB device info
+            usb_base_path = f"/sys/class/tty/ttyUSB{device_num}/device"
+            
+            if not os.path.exists(usb_base_path):
+                return False
+            
+            # Traverse up the USB hierarchy to find vendor/product IDs
+            current_path = usb_base_path
+            for _ in range(5):  # Max 5 levels up
+                vendor_file = os.path.join(current_path, "idVendor")
+                product_file = os.path.join(current_path, "idProduct")
+                
+                if os.path.exists(vendor_file) and os.path.exists(product_file):
+                    try:
+                        with open(vendor_file, 'r') as f:
+                            vendor_id = f.read().strip()
+                        with open(product_file, 'r') as f:
+                            product_id = f.read().strip()
+                        
+                        logger.debug(f"Device {device_path}: Vendor={vendor_id}, Product={product_id}")
+                        
+                        # Check if this is our Garmin device
+                        if vendor_id == GARMIN_VENDOR_ID and product_id == GARMIN_PRODUCT_ID:
+                            return True
+                    except Exception as e:
+                        logger.debug(f"Error reading USB IDs for {device_path}: {e}")
+                        break
+                
+                # Move up one level in the directory tree
+                parent_path = os.path.dirname(current_path)
+                if parent_path == current_path:  # Reached root
+                    break
+                current_path = parent_path
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error checking device {device_path}: {e}")
+            return False
+    
+    def get_device_path(self):
+        """Get current detected device path"""
+        # Re-scan if detection is old or device missing
+        if (not self.detected_device or 
+            not os.path.exists(self.detected_device) or 
+            time.time() - self.last_detection_time > 30):
+            
+            self.find_garmin_device()
+        
+        return self.detected_device
 
 class CompassReader:
     """Independent compass reader for mission-critical heading data"""
@@ -72,56 +178,48 @@ class CompassReader:
                 logger.info(f"Loaded compass calibration: X={self.calibration_offset_x}, Y={self.calibration_offset_y}")
         except Exception as e:
             logger.warning(f"Could not load compass calibration: {e}, using defaults")
-        
-    def initialize_compass(self):
-        """Initialize the QMC5883L compass"""
+    
+    def initialize(self):
+        """Initialize compass with error handling"""
         try:
             import smbus
             self.bus = smbus.SMBus(I2C_BUS)
             
-            # Load calibration
-            self.load_calibration()
-            
             # Initialize QMC5883L
-            self.bus.write_byte_data(QMC5883L_ADDR, 0x09, 0x1D)
-            time.sleep(0.01)
+            self.bus.write_byte_data(QMC5883L_ADDR, 0x0B, 0x01)  # SET/RESET
+            time.sleep(0.1)
+            self.bus.write_byte_data(QMC5883L_ADDR, 0x09, 0x1D)  # Control register
             
-            # Test read to verify connection
-            chip_id = self.bus.read_byte_data(QMC5883L_ADDR, 0x0D)
-            
+            self.load_calibration()
             self.compass_active = True
-            logger.info("Compass initialized successfully")
+            logger.info("✅ Compass initialized successfully")
             return True
             
         except ImportError:
-            logger.error("smbus module not available - install python3-smbus")
-            self.compass_active = False
+            logger.warning("smbus not available, compass disabled")
             return False
         except Exception as e:
-            logger.error(f"Failed to initialize compass: {e}")
-            self.compass_active = False
+            logger.warning(f"Compass initialization failed: {e}")
             return False
     
-    def read_compass(self):
-        """Read compass heading, return degrees (0-359)"""
+    def read_heading(self):
+        """Read compass heading with error handling"""
         if not self.compass_active:
-            return self.last_valid_heading
-            
-        try:
-            # Check data ready
-            status = self.bus.read_byte_data(QMC5883L_ADDR, 0x06)
-            if not (status & 0x01):
+            with self.lock:
                 return self.last_valid_heading
-            
-            # Read X, Y, Z values
+        
+        try:
+            # Read raw magnetometer data
             data = self.bus.read_i2c_block_data(QMC5883L_ADDR, 0x00, 6)
             
             # Convert to signed 16-bit values
             x = (data[1] << 8) | data[0]
             y = (data[3] << 8) | data[2]
             
-            if x > 32767: x -= 65536
-            if y > 32767: y -= 65536
+            if x > 32767:
+                x -= 65536
+            if y > 32767:
+                y -= 65536
             
             # Apply calibration
             x_cal = x - self.calibration_offset_x
@@ -130,11 +228,8 @@ class CompassReader:
             # Calculate heading
             import math
             heading_rad = math.atan2(y_cal, x_cal)
-            heading_deg = math.degrees(heading_rad)
+            heading_deg = (math.degrees(heading_rad) + 360) % 360
             
-            if heading_deg < 0:
-                heading_deg += 360
-                
             with self.lock:
                 self.heading = heading_deg
                 self.last_valid_heading = heading_deg
@@ -150,96 +245,114 @@ class CompassReader:
         with self.lock:
             return self.heading
 
-class SimpleGPSDManager:
-    def __init__(self, device_path="/dev/ttyUSB0"):
-        self.device_path = device_path
+class EnhancedGPSDManager:
+    """Enhanced GPSD manager with automatic Garmin device detection"""
+    
+    def __init__(self):
+        self.device_detector = GarminDeviceDetector()
         self.device_present = False
+        self.current_device_path = None
         
+    def get_device_path(self):
+        """Get current Garmin device path"""
+        return self.device_detector.get_device_path()
+    
     def check_device(self):
-        """Check if GPS device is present"""
-        present = os.path.exists(self.device_path)
+        """Check if Garmin GPS device is present"""
+        device_path = self.get_device_path()
+        present = device_path is not None and os.path.exists(device_path)
+        
         if present != self.device_present:
             if present:
-                logger.info(f"GPS device {self.device_path} connected")
+                logger.info(f"✅ Garmin GPS device {device_path} connected")
+                self.current_device_path = device_path
             else:
-                logger.warning(f"GPS device {self.device_path} disconnected")
+                logger.warning(f"❌ Garmin GPS device disconnected")
+                self.current_device_path = None
+                
         self.device_present = present
         return present
 
-    def simple_restart_gpsd(self):
+    def restart_gpsd_with_device(self):
         """
-        Simple GPSD restart using the EXACT approach that worked in your test
-        No complex cleanup, no multiple scripts, just the working method
+        Restart GPSD with the detected Garmin device using proven method
         """
         try:
-            logger.info("Starting simple GPSD restart...")
+            device_path = self.get_device_path()
+            if not device_path:
+                logger.error("Cannot start GPSD: No Garmin device detected")
+                return False
             
-            # Step 1: Kill all GPSD (simple approach)
+            logger.info(f"Starting GPSD restart sequence for device: {device_path}")
+            
+            # Step 1: Clean shutdown (like the working manual fix)
             logger.info("Stopping all GPSD processes...")
             subprocess.run(['sudo', 'pkill', '-f', 'gpsd'], check=False)
             time.sleep(2)
             
-            # Step 2: Clean up sockets (simple approach)
+            # Step 2: Clean up sockets
             logger.info("Cleaning up sockets...")
             for socket_path in ['/var/run/gpsd.sock', '/tmp/gpsd.sock']:
                 try:
                     if os.path.exists(socket_path):
                         os.remove(socket_path)
-                except:
-                    pass
+                        logger.debug(f"Removed socket: {socket_path}")
+                except Exception as e:
+                    logger.debug(f"Could not remove {socket_path}: {e}")
             
-            # Step 3: Check device
-            if not self.check_device():
-                logger.error(f"Device {self.device_path} not present")
+            # Step 3: Verify device exists and set permissions
+            if not os.path.exists(device_path):
+                logger.error(f"Device {device_path} not found")
                 return False
-                
-            # Step 4: Fix permissions (just like the test)
-            subprocess.run(['sudo', 'chmod', '666', self.device_path], check=False)
             
-            # Step 5: Start GPSD with EXACT same command that worked
+            subprocess.run(['sudo', 'chmod', '666', device_path], check=False)
+            logger.debug(f"Set permissions for {device_path}")
+            
+            # Step 4: Start GPSD (exact command that works)
             logger.info("Starting GPSD...")
-            cmd = ['sudo', 'gpsd', '-n', '-N', '-F', '/tmp/gpsd.sock', self.device_path]
+            cmd = ['sudo', 'gpsd', '-n', '-N', '-F', '/tmp/gpsd.sock', device_path]
             
-            # Start in background
-            process = subprocess.Popen(cmd)
+            # Start GPSD process
+            process = subprocess.Popen(cmd, 
+                                     stdout=subprocess.PIPE, 
+                                     stderr=subprocess.PIPE)
             
-            # Give it time to start (just like the test)
+            # Give GPSD time to start (critical timing)
             time.sleep(5)
             
-            # Step 6: Verify it's working (just like the test)
+            # Step 5: Verify GPSD is working
             if self.test_gpsd_connection():
-                logger.info("✅ GPSD started successfully and is responding")
+                logger.info("✅ GPSD started successfully and responding")
                 return True
             else:
-                logger.error("❌ GPSD started but not responding")
-                # Kill the non-working process
+                logger.error("❌ GPSD started but not responding properly")
+                # Clean up failed attempt
                 subprocess.run(['sudo', 'pkill', '-f', 'gpsd'], check=False)
                 return False
                 
         except Exception as e:
-            logger.error(f"Simple GPSD restart failed: {e}")
+            logger.error(f"GPSD restart failed: {e}")
             return False
 
     def test_gpsd_connection(self):
-        """
-        Test GPSD connection - exactly like the working test script
-        """
+        """Test GPSD connection and response"""
         try:
-            # Try to connect (just like the test)
-            sock = socket.create_connection(('localhost', 2947), timeout=10)
+            # Connect to GPSD
+            sock = socket.create_connection((GPSD_HOST, GPSD_PORT), timeout=10)
             sock.sendall(b'?WATCH={"enable":true,"nmea":true,"raw":1}\n')
             sock.settimeout(3.0)
             
-            # Try to read some data
+            # Try to read response data
             buffer = ""
-            for i in range(10):  # Short test
+            for _ in range(10):  # Short test loop
                 try:
                     data = sock.recv(4096).decode('utf-8', errors='ignore')
                     buffer += data
                     
-                    # Look for any NMEA or JSON response
+                    # Look for NMEA data or JSON response from GPSD
                     if '$' in buffer or '"class":"VERSION"' in buffer:
                         sock.close()
+                        logger.debug("GPSD connection test successful")
                         return True
                         
                 except socket.timeout:
@@ -247,6 +360,7 @@ class SimpleGPSDManager:
                 time.sleep(0.1)
             
             sock.close()
+            logger.debug("GPSD connection test failed - no valid response")
             return False
             
         except Exception as e:
@@ -302,7 +416,7 @@ class GarminReader:
     
     def __init__(self):
         self.compass = CompassReader()
-        self.gpsd_manager = SimpleGPSDManager(DEVICE_PATH)
+        self.gpsd_manager = EnhancedGPSDManager()
         self.health = SystemHealth()
         self.running = True
         self.gpsd_connected = False
@@ -310,107 +424,98 @@ class GarminReader:
         self.setup_udp_socket()
         
         # Initialize system on startup
-        self.simple_initialize_system()
+        self.initialize_system()
 
-    def simple_initialize_system(self):
-        """Simple system initialization"""
-        logger.info("Initializing GPS system...")
+    def initialize_system(self):
+        """Initialize all system components"""
+        logger.info("=== Garmin GPS System Initialization ===")
         
-        # Just start GPSD - no complex cleanup
-        if self.gpsd_manager.simple_restart_gpsd():
-            logger.info("✅ GPS system initialized successfully")
+        # Wait a moment for startup script to complete
+        time.sleep(2)
+        
+        # Initialize compass
+        self.compass.initialize()
+        
+        # Find Garmin device
+        device_path = self.gpsd_manager.get_device_path()
+        if device_path:
+            logger.info(f"✅ Garmin device detected: {device_path}")
         else:
-            logger.warning("⚠️ GPS initialization failed - will retry in main loop")
+            logger.error("❌ No Garmin device found - GPS functionality disabled")
         
-        logger.info("GPS system initialization complete")
+        logger.info("=== System Initialization Complete ===")
 
     def setup_udp_socket(self):
-        """Initialize UDP broadcast socket"""
+        """Setup UDP broadcast socket"""
         try:
             self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
-            logger.info("UDP broadcast socket initialized")
+            self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            logger.info(f"✅ UDP broadcast configured: {BROADCAST_IP}:{BROADCAST_PORT}")
         except Exception as e:
             logger.error(f"Failed to setup UDP socket: {e}")
     
     def broadcast_message(self, message):
-        """Safely broadcast a message"""
+        """Broadcast message via UDP"""
         if self.udp_sock:
             try:
-                self.udp_sock.sendto(message.encode('ascii', errors='ignore'), 
-                                   (BROADCAST_IP, BROADCAST_PORT))
-                return True
+                self.udp_sock.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
             except Exception as e:
-                logger.warning(f"Broadcast failed: {e}")
-                return False
-        return False
+                logger.debug(f"UDP broadcast failed: {e}")
     
     def calculate_nmea_checksum(self, sentence):
         """Calculate NMEA checksum"""
         checksum = 0
         for char in sentence:
             checksum ^= ord(char)
-        return checksum
-    
-    def compass_broadcast_loop(self):
-        """Independent compass broadcast loop - MISSION CRITICAL"""
-        logger.info("Starting compass broadcast loop...")
-        
-        # Try to initialize compass
-        self.compass.initialize_compass()
-        
-        while self.running:
-            try:
-                heading = self.compass.read_compass()
-                nmea_sentence = f"HCHDG,{heading:.1f},,,,0.0"
-                checksum = self.calculate_nmea_checksum(nmea_sentence)
-                hchdg = f"${nmea_sentence}*{checksum:02X}"
-                
-                if self.broadcast_message(hchdg):
-                    self.health.update_compass()
-                    logger.debug(f"[COMPASS] {hchdg}")
-                
-                time.sleep(HEADING_INTERVAL)
-                
-            except Exception as e:
-                logger.error(f"Compass broadcast error: {e}")
-                time.sleep(HEADING_INTERVAL)
+        return f"{checksum:02X}"
     
     def heartbeat_loop(self):
-        """Broadcast heartbeat messages"""
+        """Send periodic heartbeat messages"""
         while self.running:
             try:
-                timestamp = time.strftime('%H%M%S')
-                heartbeat_sentence = f"PIHBX,HEARTBEAT,{timestamp}"
-                checksum = self.calculate_nmea_checksum(heartbeat_sentence)
-                heartbeat = f"${heartbeat_sentence}*{checksum:02X}"
+                timestamp = time.strftime("%H%M%S", time.gmtime())
+                device_status = "OK" if self.gpsd_manager.device_present else "NO_GPS"
+                compass_status = "OK" if self.compass.compass_active else "NO_COMPASS"
                 
-                if self.broadcast_message(heartbeat):
-                    self.health.update_heartbeat()
-                    logger.info(f"Heartbeat sent: {timestamp}")
+                heartbeat = f"HBGPS,{timestamp},{device_status},{compass_status}"
+                checksum = self.calculate_nmea_checksum(heartbeat)
+                message = f"${heartbeat}*{checksum}"
                 
+                self.broadcast_message(message)
+                self.health.update_heartbeat()
+                
+                logger.debug(f"Heartbeat: {message}")
                 time.sleep(HEARTBEAT_INTERVAL)
                 
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
                 time.sleep(HEARTBEAT_INTERVAL)
     
-    def watchdog_loop(self):
-        """Send systemd watchdog notifications"""
+    def compass_loop(self):
+        """Send periodic compass heading messages"""
         while self.running:
             try:
-                self.health.send_watchdog_notification()
-                time.sleep(WATCHDOG_INTERVAL)
+                heading = self.compass.read_heading()
+                timestamp = time.strftime("%H%M%S", time.gmtime())
+                
+                # Create custom compass NMEA sentence
+                compass_data = f"COMPASS,{timestamp},{heading:.1f}"
+                checksum = self.calculate_nmea_checksum(compass_data)
+                message = f"${compass_data}*{checksum}"
+                
+                self.broadcast_message(message)
+                self.health.update_compass()
+                
+                logger.debug(f"Compass: {message}")
+                time.sleep(HEADING_INTERVAL)
+                
             except Exception as e:
-                logger.error(f"Watchdog loop error: {e}")
-                time.sleep(WATCHDOG_INTERVAL)
+                logger.error(f"Compass error: {e}")
+                time.sleep(HEADING_INTERVAL)
     
-### New Code START
-
-    # Enhanced device monitoring with more aggressive recovery
-    def enhanced_device_monitor_loop(self):
-        """Enhanced device monitor that triggers aggressive recovery"""
+    def device_monitor_loop(self):
+        """Enhanced device monitoring with automatic recovery"""
         consecutive_failures = 0
         max_failures = 3
         
@@ -420,26 +525,22 @@ class GarminReader:
                 
                 # Device disconnected
                 if not device_present and self.gpsd_manager.device_present:
-                    logger.warning("GPS device disconnected! Starting enhanced recovery...")
+                    logger.warning("GPS device disconnected, starting recovery...")
                     self.gpsd_connected = False
                     consecutive_failures += 1
                     
                     if consecutive_failures >= max_failures:
-                        logger.error(f"Device failed {consecutive_failures} times, triggering full recovery")
-                        if self.gpsd_manager.simple_restart_gpsd():
+                        logger.error(f"Device failed {consecutive_failures} times, full restart")
+                        if self.gpsd_manager.restart_gpsd_with_device():
                             consecutive_failures = 0
-                            logger.info("Enhanced recovery completed successfully")
+                            logger.info("Device recovery completed")
                         else:
-                            logger.error("Enhanced recovery failed")
-                            # Trigger service restart as last resort
-                            logger.critical("Requesting service restart due to recovery failure")
-                            os.system("systemctl restart gps-stream.service &")
-                            time.sleep(30)  # Give time for restart
+                            logger.error("Device recovery failed")
                 
                 # Device reconnected
                 elif device_present and not self.gpsd_manager.device_present:
-                    logger.info("GPS device reconnected! Performing enhanced restart...")
-                    if self.gpsd_manager.simple_restart_gpsd():
+                    logger.info("GPS device reconnected! Starting recovery...")
+                    if self.gpsd_manager.restart_gpsd_with_device():
                         consecutive_failures = 0
                         time.sleep(5)
                         logger.info("Device reconnection recovery completed")
@@ -456,10 +557,8 @@ class GarminReader:
                 time.sleep(DEVICE_CHECK_INTERVAL)
                 
             except Exception as e:
-                logger.error(f"Enhanced device monitor error: {e}")
+                logger.error(f"Device monitor error: {e}")
                 time.sleep(DEVICE_CHECK_INTERVAL)
-
-### New Code END
     
     def connect_to_gpsd(self):
         """Connect to gpsd with timeout and error handling"""
@@ -479,7 +578,7 @@ class GarminReader:
             return None
     
     def gpsd_loop(self):
-        """Main GPSD data processing loop with recovery"""
+        """Main GPSD data processing loop with enhanced recovery"""
         buffer = ""
         
         while self.running:
@@ -488,7 +587,7 @@ class GarminReader:
             try:
                 # Wait for device to be available
                 while self.running and not self.gpsd_manager.check_device():
-                    logger.info("Waiting for GPS device...")
+                    logger.info("Waiting for Garmin GPS device...")
                     time.sleep(5)
                 
                 if not self.running:
@@ -498,7 +597,7 @@ class GarminReader:
                 gpsd_sock = self.connect_to_gpsd()
                 if not gpsd_sock:
                     logger.warning("GPSD connection failed, attempting restart...")
-                    if self.gpsd_manager.simple_restart_gpsd():
+                    if self.gpsd_manager.restart_gpsd_with_device():
                         time.sleep(3)
                         continue
                     else:
@@ -528,26 +627,30 @@ class GarminReader:
                                     if '*' not in line:
                                         sentence = line[1:]
                                         checksum = self.calculate_nmea_checksum(sentence)
-                                        line = f"{line}*{checksum:02X}"
+                                        line = f"{line}*{checksum}"
                                     
-                                    if self.broadcast_message(line):
-                                        self.health.update_gps()
-                                        logger.info(f"[GPS] {line}")
+                                    # Broadcast NMEA data
+                                    self.broadcast_message(line)
+                                    self.health.update_gps()
+                                    logger.debug(f"GPS: {line}")
+                                    
+                                elif '"class":"TPV"' in line or '"class":"SKY"' in line:
+                                    # Process JSON data from GPSD if needed
+                                    logger.debug(f"GPSD JSON: {line[:100]}...")
                         
-                        # Check if device is still connected
-                        if not self.gpsd_manager.check_device():
-                            logger.warning("Device disconnected during operation")
-                            break
-                            
+                        # Send watchdog notification
+                        self.health.send_watchdog_notification()
+                        
                     except socket.timeout:
                         continue
                     except Exception as e:
-                        logger.error(f"GPSD read error: {e}")
+                        logger.error(f"GPSD data processing error: {e}")
                         break
-            
+                
             except Exception as e:
                 logger.error(f"GPSD loop error: {e}")
-            
+                self.gpsd_connected = False
+                
             finally:
                 if gpsd_sock:
                     try:
@@ -555,75 +658,78 @@ class GarminReader:
                     except:
                         pass
                 
-                self.gpsd_connected = False
-                logger.info("Disconnected from gpsd, will retry...")
                 time.sleep(5)
     
+    def watchdog_loop(self):
+        """System watchdog monitoring"""
+        while self.running:
+            try:
+                self.health.send_watchdog_notification()
+                
+                if not self.health.is_healthy():
+                    logger.warning("System health check failed")
+                
+                time.sleep(WATCHDOG_INTERVAL)
+                
+            except Exception as e:
+                logger.error(f"Watchdog error: {e}")
+                time.sleep(WATCHDOG_INTERVAL)
+    
     def signal_handler(self, signum, frame):
-        """Handle shutdown signals gracefully"""
+        """Handle shutdown signals"""
         logger.info(f"Received signal {signum}, shutting down...")
         self.running = False
-        
-        if SYSTEMD_AVAILABLE:
-            try:
-                systemd.daemon.notify('STOPPING=1')
-            except:
-                pass
     
     def run(self):
-        """Main execution method"""
-        signal.signal(signal.SIGINT, self.signal_handler)
+        """Main execution function"""
+        logger.info("=== Starting Garmin GPS Broadcasting System ===")
+        
+        # Setup signal handlers
         signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGINT, self.signal_handler)
         
-        logger.info("Starting Garmin Reader with enhanced GPSD management...")
-        
-        if SYSTEMD_AVAILABLE:
-            try:
-                systemd.daemon.notify('READY=1')
-                logger.info("Notified systemd service is ready")
-            except Exception as e:
-                logger.warning(f"Failed to notify systemd: {e}")
-        
-        # Start all threads
+        # Start background threads
         threads = [
-            threading.Thread(target=self.compass_broadcast_loop, daemon=True, name="CompassBroadcast"),
-            threading.Thread(target=self.heartbeat_loop, daemon=True, name="Heartbeat"),
-            threading.Thread(target=self.enhanced_device_monitor_loop, daemon=True, name="DeviceMonitor"),
-            threading.Thread(target=self.gpsd_loop, daemon=True, name="GPSDLoop"),
-            threading.Thread(target=self.watchdog_loop, daemon=True, name="WatchdogLoop")
+            threading.Thread(target=self.heartbeat_loop, daemon=True),
+            threading.Thread(target=self.compass_loop, daemon=True),
+            threading.Thread(target=self.device_monitor_loop, daemon=True),
+            threading.Thread(target=self.watchdog_loop, daemon=True)
         ]
         
         for thread in threads:
             thread.start()
-            logger.info(f"Started {thread.name} thread")
+            logger.info(f"Started thread: {thread.name}")
         
-        time.sleep(2)
-        
+        # Main GPSD processing loop
         try:
-            while self.running:
-                if not self.health.is_healthy():
-                    logger.warning("System health check failed")
-                time.sleep(10)
-                
+            self.gpsd_loop()
         except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
+            logger.info("Received keyboard interrupt")
+        except Exception as e:
+            logger.error(f"Main loop error: {e}")
+        finally:
+            logger.info("Shutting down system...")
+            self.running = False
+            
+            if self.udp_sock:
+                self.udp_sock.close()
+            
+            logger.info("=== System Shutdown Complete ===")
+
+def main():
+    """Main entry point"""
+    try:
+        # Notify systemd that we're ready
+        if SYSTEMD_AVAILABLE:
+            systemd.daemon.notify('READY=1')
         
-        self.running = False
+        # Create and run the GPS reader
+        gps_reader = GarminReader()
+        gps_reader.run()
         
-        for thread in threads:
-            if thread.is_alive():
-                thread.join(timeout=5)
-        
-        logger.info("Shutdown complete")
+    except Exception as e:
+        logger.error(f"Critical error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    if '--help' in sys.argv:
-        print(__doc__)
-        sys.exit()
-    
-    if os.geteuid() != 0:
-        logger.error("Must run as root for hardware access")
-        sys.exit(1)
-    
-    reader = GarminReader()
-    reader.run()
+    main()
