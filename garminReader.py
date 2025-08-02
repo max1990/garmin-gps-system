@@ -476,7 +476,7 @@ class GarminReader:
                 device_status = "OK" if self.gpsd_manager.device_present else "NO_GPS"
                 compass_status = "OK" if self.compass.compass_active else "NO_COMPASS"
                 
-                heartbeat = f"HBGPS,{timestamp},{device_status},{compass_status}"
+                heartbeat = f"PIHBX,HEARTBEAT,{timestamp},{device_status},{compass_status}"
                 checksum = self.calculate_nmea_checksum(heartbeat)
                 message = f"${heartbeat}*{checksum}"
                 
@@ -497,8 +497,8 @@ class GarminReader:
                 heading = self.compass.read_heading()
                 timestamp = time.strftime("%H%M%S", time.gmtime())
                 
-                # Create custom compass NMEA sentence
-                compass_data = f"COMPASS,{timestamp},{heading:.1f}"
+                # Create custom compass NMEA sentence -- FIX THIS, IT NEEDS TO BE STANDARD NMEA FORMAT
+                compass_data = f"HCHDG,{timestamp},{heading:.1f}"
                 checksum = self.calculate_nmea_checksum(compass_data)
                 message = f"${compass_data}*{checksum}"
                 
@@ -731,6 +731,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
