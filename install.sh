@@ -73,7 +73,7 @@ detect_garmin_devices() {
                 if [ -d "$usb_path" ]; then
                     # Look for vendor/product IDs
                     current_path="$usb_path"
-                    for level in {1..5}; do
+                    for i in {1..5}; do
                         vendor_file="$current_path/idVendor"
                         product_file="$current_path/idProduct"
                         
