@@ -11,6 +11,14 @@ Mission-critical GPS and compass broadcasting system for Raspberry Pi with autom
 📡 **UDP Broadcasting** - Network-wide sensor data distribution
 ⚡ **Optimized for Pi 2** - Efficient resource usage
 
+## Testing Hardware Compatibility
+
+Before installation, test if your Garmin Montana 710 is properly detected:
+
+```bash
+# Download and run the hardware test
+curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/test_garmin_detection.sh | sudo bash
+
 ## Quick Installation
 
 Run this single command on your Raspberry Pi:
