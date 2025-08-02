@@ -78,20 +78,15 @@ class GarminDeviceDetector:
         """Find Garmin device by USB vendor/product ID"""
         logger.info("Scanning for Garmin Montana 710 devices...")
         
-        # First check if startup script already detected device
-        if os.path.exists("/tmp/garmin_device_path"):
-            try:
-                with open("/tmp/garmin_device_path", "r") as f:
-                    device_path = f.read().strip()
-                    if os.path.exists(device_path):
-                        logger.info(f"✅ Using pre-detected Garmin device: {device_path}")
-                        self.detected_device = device_path
-                        self.last_detection_time = time.time()
-                        return device_path
-            except Exception as e:
-                logger.warning(f"Could not read pre-detected device: {e}")
+        # First check environment variable (from EnvironmentFile)
+        if self.env_device_path and os.path.exists(self.env_device_path):
+            logger.info(f"✅ Using environment-specified Garmin device: {self.env_device_path}")
+            self.detected_device = self.env_device_path
+            self.last_detection_time = time.time()
+            return self.env_device_path
         
-        # Scan for Garmin devices
+        # REMOVED: /tmp/garmin_device_path check - no longer needed
+        # Direct USB scanning for Garmin devices
         for device_path in glob.glob("/dev/ttyUSB*"):
             if self._is_garmin_device(device_path):
                 logger.info(f"✅ Found Garmin Montana 710 at {device_path}")
@@ -754,4 +749,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
