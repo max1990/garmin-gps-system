@@ -64,13 +64,13 @@ detect_garmin_devices() {
         
         for device in /dev/ttyUSB*; do
             if [ -c "$device" ]; then
-                log_info "  Checking $device..."
+                log_info "Checking $device..."
                 
                 # SIMPLE APPROACH: Use udevadm to check for Garmin IDs
                 if udevadm info -a -n "$device" 2>/dev/null | grep -q 'ATTRS{idVendor}=="091e"' && \
                    udevadm info -a -n "$device" 2>/dev/null | grep -q 'ATTRS{idProduct}=="0003"'; then
                     
-                    log_info "    ✅ GARMIN MONTANA 710 DETECTED!"
+                    log_info "✅ GARMIN MONTANA 710 DETECTED!"
                     found_garmin=true
                 else
                     log_info "    Not a Garmin Montana 710"
@@ -294,19 +294,19 @@ done
 log_info "Testing Python dependencies..."
 python3 -c "
 import socket, time, threading, logging, subprocess, os, signal, sys, select, glob
-print('✅ Core Python modules available')
+print('        ✅ Core Python modules available')
 
 try:
     import smbus
-    print('✅ smbus module available')
+    print('        ✅ smbus module available')
 except ImportError:
-    print('⚠️ smbus module not available (compass may not work)')
+    print('        ⚠️ smbus module not available (compass may not work)')
 
 try:
     import systemd.daemon
-    print('✅ systemd module available')
+    print('        ✅ systemd module available')
 except ImportError:
-    print('⚠️ systemd module not available (notifications disabled)')
+    print('        ⚠️ systemd module not available (notifications disabled)')
 "
 
 # Final hardware check
