@@ -178,6 +178,17 @@ if command -v lsusb >/dev/null; then
     lsusb | grep -E "(Garmin|091e)" || log_info "No Garmin devices found in lsusb output"
 fi
 
+# Create cuas user if it doesn't exist
+if ! id -u cuas >/dev/null 2>&1; then
+    log_info "Creating cuas user..."
+    useradd -m -s /bin/bash -G dialout,i2c,gpio cuas
+    log_info "Created cuas user with required groups"
+else
+    log_info "User cuas already exists"
+    # Ensure cuas has required groups
+    usermod -a -G dialout,i2c,gpio cuas 2>/dev/null || true
+fi
+
 # Directory structure
 log_step "4/10 Creating directory structure..."
 mkdir -p /home/cuas /var/log
