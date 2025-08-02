@@ -1,4 +1,3 @@
-sudo tee /home/cuas/gps_startup_cleanup.sh > /dev/null << 'EOF'
 #!/bin/bash
 
 # Enhanced GPS System Startup Cleanup Script with Garmin USB Detection
@@ -201,4 +200,3 @@ main() {
 
 # Run main function
 main "$@"
-EOF
