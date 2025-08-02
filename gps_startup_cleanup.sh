@@ -131,7 +131,7 @@ main() {
     log "=== Enhanced GPS System Startup Cleanup ==="
     
     # Step 1: Wait for USB to stabilize
-    wait_for_usb_stable()
+    wait_for_usb_stable
     
     # Step 2: Find Garmin device
     if ! find_garmin_device; then
