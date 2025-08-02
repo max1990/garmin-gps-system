@@ -6,6 +6,11 @@
 
 set -euo pipefail
 
+# Logging function
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
 # --- CONFIG ---
 DEVICE=$(cat /tmp/garmin_device_path 2>/dev/null || echo "/dev/ttyUSB0")
 if [ "$DEVICE" = "/dev/ttyUSB0" ]; then
@@ -19,11 +24,6 @@ SCRIPT_PATH="/home/cuas/garminReader.py"
 LOG_FILE="/var/log/gps_service.log"
 MAX_RETRIES=5
 RETRY_COUNT=0
-
-# Logging function
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
 
 # Cleanup function
 cleanup() {
