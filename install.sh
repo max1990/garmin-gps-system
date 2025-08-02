@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# GPS System Easy Installer for Raspberry Pi
+# Enhanced GPS System Installer with Automatic Garmin Detection
 # Author: Maximilian Leutermann
 # Usage: curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/install.sh | sudo bash
 
@@ -29,7 +29,7 @@ log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
 }
 
-# Function to download with retries - MUST BE DEFINED FIRST
+# Function to download with retries
 download_with_retry() {
     local url="$1"
     local output="$2"
@@ -52,14 +52,72 @@ download_with_retry() {
     return 1
 }
 
+# Enhanced pre-installation Garmin detection
+detect_garmin_devices() {
+    log_step "Pre-installation Garmin device detection..."
+    
+    local found_garmin=false
+    
+    # Check for any ttyUSB devices
+    if ls /dev/ttyUSB* >/dev/null 2>&1; then
+        log_info "Found USB serial devices:"
+        
+        for device in /dev/ttyUSB*; do
+            if [ -c "$device" ]; then
+                device_num=$(basename "$device" | sed 's/ttyUSB//')
+                usb_path="/sys/class/tty/ttyUSB${device_num}/device"
+                
+                log_info "  Checking $device..."
+                
+                # Try to find USB vendor/product info
+                if [ -d "$usb_path" ]; then
+                    # Look for vendor/product IDs
+                    current_path="$usb_path"
+                    for level in {1..5}; do
+                        vendor_file="$current_path/idVendor"
+                        product_file="$current_path/idProduct"
+                        
+                        if [ -f "$vendor_file" ] && [ -f "$product_file" ]; then
+                            vendor_id=$(cat "$vendor_file" 2>/dev/null)
+                            product_id=$(cat "$product_file" 2>/dev/null)
+                            
+                            log_info "    Vendor: $vendor_id, Product: $product_id"
+                            
+                            if [ "$vendor_id" = "091e" ] && [ "$product_id" = "0003" ]; then
+                                log_info "    ✅ GARMIN MONTANA 710 DETECTED!"
+                                found_garmin=true
+                            fi
+                            break
+                        fi
+                        current_path=$(dirname "$current_path")
+                    done
+                fi
+            fi
+        done
+    else
+        log_warn "No USB serial devices found at /dev/ttyUSB*"
+    fi
+    
+    if [ "$found_garmin" = true ]; then
+        log_info "✅ Garmin Montana 710 detected - installation will proceed"
+        return 0
+    else
+        log_warn "⚠️ No Garmin Montana 710 detected"
+        log_warn "   System will still install but GPS may not work until device is connected"
+        log_warn "   Expected: Vendor ID 091e, Product ID 0003"
+        return 1
+    fi
+}
+
 # Banner
 echo -e "${BLUE}"
 echo "=============================================================="
-echo "    🛰️  GPS System Installer for Raspberry Pi 🧭"
+echo "  🛰️ Enhanced GPS System Installer for Raspberry Pi 🧭"
+echo "      with Automatic Garmin Montana 710 Detection"
 echo "=============================================================="
 echo -e "${NC}"
-echo "This installer will set up your mission-critical GPS and"
-echo "compass broadcasting system with automatic recovery."
+echo "This installer will set up your GPS system with automatic"
+echo "Garmin device detection and robust startup sequencing."
 echo ""
 
 # Check if running as root
@@ -73,208 +131,153 @@ fi
 PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0' || echo "Unknown")
 log_info "Detected: $PI_MODEL"
 
+# Pre-installation device detection
+detect_garmin_devices || true
+
 # Get the GitHub repository URL
 GITHUB_USER="max1990"
 REPO_NAME="garmin-gps-system"
 BASE_URL="https://raw.githubusercontent.com/$GITHUB_USER/$REPO_NAME/main"
 
-# Fix system clock FIRST - this is critical
-log_step "0/9 Fixing system clock (CRITICAL)..."
+# System clock fix
+log_step "1/10 Fixing system clock..."
 log_info "Current date: $(date)"
 
-# Force set date to a reasonable time if it's clearly wrong
 CURRENT_YEAR=$(date +%Y)
 if [ "$CURRENT_YEAR" -gt 2025 ] || [ "$CURRENT_YEAR" -lt 2023 ]; then
-    log_warn "System date is clearly wrong (year: $CURRENT_YEAR), forcing reset"
-    # Set to a reasonable date in 2024
+    log_warn "System date appears wrong (year: $CURRENT_YEAR), attempting fix"
     date -s "2024-07-30 12:00:00" || log_warn "Could not manually set date"
 fi
 
-# Try multiple time sync methods
 if command -v timedatectl >/dev/null 2>&1; then
     timedatectl set-ntp true
     log_info "Enabled NTP time sync"
-    sleep 3  # Give NTP a moment
 fi
 
-if command -v ntpdate >/dev/null 2>&1; then
-    # Try multiple NTP servers
-    for server in "time.nist.gov" "pool.ntp.org" "time.google.com" "0.pool.ntp.org"; do
-        if ntpdate -s "$server" 2>/dev/null; then
-            log_info "Time synced with $server"
-            break
-        fi
-    done
-fi
+# Package updates
+log_step "2/10 Updating system packages..."
+export DEBIAN_FRONTEND=noninteractive
 
-log_info "Fixed date: $(date)"
+apt-get update -qq
+apt-get install -y -qq wget gpsd gpsd-clients python3-smbus python3-systemd i2c-tools usbutils
 
-log_step "1/9 Updating system packages..."
-# Be more aggressive about fixing repository issues
-apt-get clean
-apt-get -o Acquire::Check-Valid-Until=false -o Acquire::AllowInsecureRepositories=true update || {
-    log_warn "Standard update failed, trying alternative approach..."
-    
-    # Update just the essential repositories
-    echo "deb http://raspbian.raspberrypi.com/raspbian/ bookworm main contrib non-free rpi" > /tmp/sources.list.backup
-    echo "deb http://archive.raspberrypi.com/debian/ bookworm main" >> /tmp/sources.list.backup
-    
-    apt-get -o Acquire::Check-Valid-Until=false -o Dir::Etc::sourcelist=/tmp/sources.list.backup update || log_warn "Alternative update also failed, continuing..."
-}
+log_info "Essential packages installed"
 
-# Try upgrade but don't fail if it doesn't work
-apt-get upgrade -y || log_warn "Some packages could not be upgraded, continuing..."
+# Hardware detection and setup
+log_step "3/10 Hardware setup and detection..."
 
-log_step "2/9 Installing required packages..."
-# Install packages one by one to avoid dependency issues
-ESSENTIAL_PACKAGES="python3-pip python3-dev i2c-tools gpsd gpsd-clients git curl wget"
-OPTIONAL_PACKAGES="python3-venv python3-full ntpdate"
-
-# Install essential packages first
-for package in $ESSENTIAL_PACKAGES; do
-    if apt-get install -y "$package" 2>/dev/null; then
-        log_info "✅ Installed $package"
-    else
-        log_warn "❌ Failed to install $package (may cause issues)"
-    fi
-done
-
-# Install optional packages (don't fail if they don't work)
-for package in $OPTIONAL_PACKAGES; do
-    if apt-get install -y "$package" 2>/dev/null; then
-        log_info "✅ Installed $package"
-    else
-        log_warn "⚠️ Skipped $package (optional)"
-    fi
-done
-
-log_step "3/9 Installing Python dependencies..."
-# Try system packages first
-log_info "Attempting to install Python packages via apt..."
-apt-get install -y python3-systemd python3-smbus python3-serial 2>/dev/null || log_warn "Some system Python packages not available"
-
-# For packages not available via apt, use pip
-log_info "Installing remaining Python packages via pip..."
-# Use multiple fallback methods for pip installation
-if command -v pip3 >/dev/null 2>&1; then
-    pip3 install --break-system-packages systemd-python smbus2 2>/dev/null || \
-    pip3 install systemd-python smbus2 2>/dev/null || \
-    pip3 install --user systemd-python smbus2 2>/dev/null || \
-    log_warn "Could not install some Python packages via pip"
-else
-    log_warn "pip3 not available, Python packages may be missing"
-fi
-
-log_step "4/9 Enabling I2C interface..."
-raspi-config nonint do_i2c 0 || log_warn "Could not enable I2C via raspi-config"
-
-# Manual I2C enable as backup
+# Enable I2C
 if ! grep -q "^dtparam=i2c_arm=on" /boot/config.txt; then
     echo "dtparam=i2c_arm=on" >> /boot/config.txt
-    log_info "Manually enabled I2C in /boot/config.txt"
+    log_info "Enabled I2C in /boot/config.txt"
 fi
 
-log_step "5/9 Creating directory structure..."
-mkdir -p /home/cuas
-mkdir -p /var/log
+# USB device enumeration
+log_info "USB device enumeration:"
+if command -v lsusb >/dev/null; then
+    lsusb | grep -E "(Garmin|091e)" || log_info "No Garmin devices found in lsusb output"
+fi
+
+# Directory structure
+log_step "4/10 Creating directory structure..."
+mkdir -p /home/cuas /var/log
 chmod 755 /home/cuas /var/log
 
-log_step "6/9 Downloading and installing system files..."
+# Download enhanced system files
+log_step "5/10 Downloading enhanced system files..."
 
-# Download all files with error handling
-download_with_retry "$BASE_URL/garminReader.py" "/home/cuas/garminReader.py" "garminReader.py" || exit 1
+# Core system files - using the enhanced versions
+download_with_retry "$BASE_URL/garminReader.py" "/home/cuas/garminReader.py" "Enhanced garminReader.py" || exit 1
+download_with_retry "$BASE_URL/gps_startup_cleanup.sh" "/home/cuas/gps_startup_cleanup.sh" "Enhanced startup cleanup script" || exit 1
 download_with_retry "$BASE_URL/system_watchdog.py" "/home/cuas/system_watchdog.py" "system_watchdog.py" || exit 1
-download_with_retry "$BASE_URL/gps_startup_cleanup.sh" "/home/cuas/gps_startup_cleanup.sh" "gps_startup_cleanup.sh" || exit 1  # ADDED THIS LINE
-download_with_retry "$BASE_URL/run_gps_service.sh" "/home/cuas/run_gps_service.sh" "run_gps_service.sh" || exit 1
-download_with_retry "$BASE_URL/start_gps_broadcaster.sh" "/home/cuas/start_gps_broadcaster.sh" "start_gps_broadcaster.sh" || exit 1
 download_with_retry "$BASE_URL/calibrate_compass.py" "/home/cuas/calibrate_compass.py" "calibrate_compass.py" || exit 1
 
-# Download systemd service files
-download_with_retry "$BASE_URL/gps-stream.service" "/etc/systemd/system/gps-stream.service" "gps-stream.service" || exit 1
-download_with_retry "$BASE_URL/gps-system-watchdog.service" "/etc/systemd/system/gps-system-watchdog.service" "gps-system-watchdog.service" || exit 1
+# Service files
+download_with_retry "$BASE_URL/gps-stream.service" "/etc/systemd/system/gps-stream.service" "Enhanced GPS service" || exit 1
+download_with_retry "$BASE_URL/gps-system-watchdog.service" "/etc/systemd/system/gps-system-watchdog.service" "Watchdog service" || exit 1
 
-# Optional hardware watchdog service
-if download_with_retry "$BASE_URL/hardware-watchdog.service" "/etc/systemd/system/hardware-watchdog.service" "hardware-watchdog.service"; then
-    log_info "Hardware watchdog service downloaded"
-else
-    log_warn "Hardware watchdog service not available, skipping"
-fi
+# Optional files
+download_with_retry "$BASE_URL/run_gps_service.sh" "/home/cuas/run_gps_service.sh" "GPS service runner" || true
+download_with_retry "$BASE_URL/start_gps_broadcaster.sh" "/home/cuas/start_gps_broadcaster.sh" "Legacy compatibility script" || true
 
-log_step "7/9 Setting up permissions and services..."
+# Permissions and ownership
+log_step "6/10 Setting up permissions..."
 
-# Create log directory and set proper permissions FIRST
-mkdir -p /var/log
-touch /var/log/garmin_reader.log
-touch /var/log/system_watchdog.log
-chmod 666 /var/log/garmin_reader.log
-chmod 666 /var/log/system_watchdog.log
-chown root:root /var/log/garmin_reader.log
-chown root:root /var/log/system_watchdog.log
+# Log files
+touch /var/log/garmin_reader.log /var/log/system_watchdog.log /var/log/gps_startup_cleanup.log
+chmod 666 /var/log/garmin_reader.log /var/log/system_watchdog.log /var/log/gps_startup_cleanup.log
+chown root:root /var/log/*.log
 
-# Set file permissions
-chmod +x /home/cuas/*.py /home/cuas/*.sh 2>/dev/null || log_warn "Could not set all file permissions"
-chown root:root /home/cuas/* 2>/dev/null || log_warn "Could not set all file ownership"
+# Executable permissions
+chmod +x /home/cuas/*.py /home/cuas/*.sh 2>/dev/null || true
+chown root:root /home/cuas/* 2>/dev/null || true
 
-# Add users to required groups (don't fail if user doesn't exist)
-usermod -a -G dialout,i2c,gpio cuas 2>/dev/null || log_warn "Could not add 'cuas' user to groups (may not exist)"
+# User groups
+usermod -a -G dialout,i2c,gpio cuas 2>/dev/null || log_warn "Could not add 'cuas' user to groups"
 usermod -a -G dialout,i2c,gpio root 2>/dev/null || log_warn "Could not add 'root' user to groups"
 
-# Create default compass calibration
+# Compass calibration
 echo "0.0" > /home/cuas/compass_calibration.txt
 echo "0.0" >> /home/cuas/compass_calibration.txt
 
-# Disable conflicting services - MORE AGGRESSIVE
+# Service configuration
+log_step "7/10 Configuring services..."
+
+# Aggressively disable conflicting GPSD services
 systemctl stop gpsd.socket gpsd gps-simple.service 2>/dev/null || true
 systemctl disable gpsd.socket gpsd gps-simple.service 2>/dev/null || true
 systemctl mask gpsd.socket gpsd 2>/dev/null || true
+
+log_info "Conflicting GPSD services disabled and masked"
 
 # Enable new services
 systemctl daemon-reload
 systemctl enable gps-stream.service || log_warn "Could not enable gps-stream.service"
 systemctl enable gps-system-watchdog.service || log_warn "Could not enable gps-system-watchdog.service"
 
-# Enable hardware watchdog if available
-if [ -f /etc/systemd/system/hardware-watchdog.service ]; then
-    systemctl enable hardware-watchdog.service && log_info "Hardware watchdog enabled"
-fi
+# System optimizations
+log_step "8/10 Applying system optimizations..."
 
-log_step "8/9 Configuring system optimizations..."
+# Boot optimizations
+if ! grep -q "# Enhanced GPS System Optimizations" /boot/config.txt; then
+    log_info "Adding GPS system optimizations to /boot/config.txt..."
+    cat >> /boot/config.txt << 'EOF'
 
-# Download and apply config.txt optimizations
-log_info "Applying boot optimizations..."
-if download_with_retry "$BASE_URL/config.txt" "/tmp/gps_config.txt" "config.txt optimizations"; then
-    # Backup original
-    cp /boot/config.txt /boot/config.txt.backup.$(date +%Y%m%d_%H%M%S)
-    
-    # Append GPS optimizations if not already present
-    if ! grep -q "# GPS System Optimizations" /boot/config.txt; then
-        log_info "Adding GPS system optimizations to /boot/config.txt..."
-        echo "" >> /boot/config.txt
-        cat /tmp/gps_config.txt >> /boot/config.txt
-    else
-        log_info "GPS optimizations already present in /boot/config.txt"
-    fi
-    rm -f /tmp/gps_config.txt
+# Enhanced GPS System Optimizations
+dtparam=i2c_arm=on
+dtparam=spi=on
+dtparam=watchdog=on
+gpu_mem=16
+disable_splash=1
+boot_delay=0
+
+# USB power management
+max_usb_current=1
+EOF
 else
-    log_warn "Could not download config.txt, applying basic optimizations..."
-    if ! grep -q "# GPS System Optimizations" /boot/config.txt; then
-        echo "" >> /boot/config.txt
-        echo "# GPS System Optimizations" >> /boot/config.txt
-        echo "dtparam=i2c_arm=on" >> /boot/config.txt
-        echo "dtparam=spi=on" >> /boot/config.txt
-        echo "dtparam=watchdog=on" >> /boot/config.txt
-        echo "gpu_mem=16" >> /boot/config.txt
-        echo "disable_splash=1" >> /boot/config.txt
-        echo "boot_delay=0" >> /boot/config.txt
-    fi
+    log_info "GPS optimizations already present in /boot/config.txt"
 fi
 
-log_step "9/9 Final verification..."
+# USB device permissions for Garmin
+cat > /etc/udev/rules.d/99-garmin-gps.rules << 'EOF'
+# Garmin Montana 710 GPS Device
+SUBSYSTEM=="tty", ATTRS{idVendor}=="091e", ATTRS{idProduct}=="0003", MODE="0666", GROUP="dialout", SYMLINK+="garmin_gps"
+# Generic Garmin devices
+SUBSYSTEM=="tty", ATTRS{idVendor}=="091e", MODE="0666", GROUP="dialout"
+EOF
 
-# Verify critical files exist
-log_info "Verifying installation..."
+log_info "Added udev rules for Garmin devices"
+
+# Reload udev rules
+udevadm control --reload-rules
+udevadm trigger
+
+# Final verification
+log_step "9/10 System verification..."
+
 CRITICAL_FILES=(
     "/home/cuas/garminReader.py"
+    "/home/cuas/gps_startup_cleanup.sh"
     "/home/cuas/system_watchdog.py"
     "/etc/systemd/system/gps-stream.service"
     "/etc/systemd/system/gps-system-watchdog.service"
@@ -282,7 +285,7 @@ CRITICAL_FILES=(
 
 ALL_GOOD=true
 for file in "${CRITICAL_FILES[@]}"; do
-    if [ -f "$file" ] && [ -s "$file" ]; then  # File exists and is not empty
+    if [ -f "$file" ] && [ -s "$file" ]; then
         log_info "✅ $file"
     else
         log_error "❌ Missing or empty: $file"
@@ -290,33 +293,11 @@ for file in "${CRITICAL_FILES[@]}"; do
     fi
 done
 
-if [ "$ALL_GOOD" = false ]; then
-    log_error "Installation verification failed - some critical files are missing"
-    log_info "Trying to re-download missing files..."
-    
-    # Try to re-download missing files
-    if [ ! -f "/home/cuas/system_watchdog.py" ] || [ ! -s "/home/cuas/system_watchdog.py" ]; then
-        log_info "Re-downloading system_watchdog.py..."
-        download_with_retry "$BASE_URL/system_watchdog.py" "/home/cuas/system_watchdog.py" "system_watchdog.py (retry)"
-    fi
-    
-    if [ ! -f "/etc/systemd/system/gps-system-watchdog.service" ] || [ ! -s "/etc/systemd/system/gps-system-watchdog.service" ]; then
-        log_info "Re-downloading gps-system-watchdog.service..."
-        download_with_retry "$BASE_URL/gps-system-watchdog.service" "/etc/systemd/system/gps-system-watchdog.service" "gps-system-watchdog.service (retry)"
-        systemctl daemon-reload
-        systemctl enable gps-system-watchdog.service || log_warn "Could not enable gps-system-watchdog.service after retry"
-    fi
-fi
-
-# Test Python imports
+# Test Python dependencies
 log_info "Testing Python dependencies..."
 python3 -c "
-try:
-    import socket, time, threading, logging, subprocess, os, signal, sys, select
-    print('✅ Core Python modules available')
-except ImportError as e:
-    print(f'❌ Missing core Python module: {e}')
-    exit(1)
+import socket, time, threading, logging, subprocess, os, signal, sys, select, glob
+print('✅ Core Python modules available')
 
 try:
     import smbus
@@ -328,74 +309,54 @@ try:
     import systemd.daemon
     print('✅ systemd module available')
 except ImportError:
-    print('⚠️ systemd module not available (watchdog notifications disabled)')
+    print('⚠️ systemd module not available (notifications disabled)')
 "
 
-# Final file check
-log_info "Final verification..."
-ALL_GOOD=true
-for file in "${CRITICAL_FILES[@]}"; do
-    if [ -f "$file" ] && [ -s "$file" ]; then
-        log_info "✅ $file"
-    else
-        log_error "❌ Still missing: $file"
-        ALL_GOOD=false
-    fi
-done
+# Final hardware check
+log_step "10/10 Final hardware verification..."
+detect_garmin_devices || true
 
 # Success message
 echo ""
 if [ "$ALL_GOOD" = true ]; then
     echo -e "${GREEN}=============================================================="
-    echo "✅ Installation Complete!"
+    echo "✅ Enhanced Installation Complete!"
     echo "==============================================================${NC}"
 else
     echo -e "${YELLOW}=============================================================="
-    echo "⚠️ Installation Mostly Complete (with some warnings)"
-    echo "==============================================================${NC}" 
+    echo "⚠️ Installation Complete with Warnings"
+    echo "==============================================================${NC}"
 fi
+
 echo ""
-echo "🔧 What was installed:"
-echo "   • GPS broadcasting system with compass integration"
-echo "   • Automatic USB disconnect recovery"
-echo "   • System watchdog with auto-restart capability"
+echo "🚀 Enhanced Features Installed:"
+echo "   • Automatic Garmin Montana 710 detection (vendor 091e, product 0003)"
+echo "   • Dynamic USB device discovery (/dev/ttyUSB0, /dev/ttyUSB1, etc.)"
+echo "   • Robust GPSD startup sequence with conflict resolution"
+echo "   • Enhanced recovery from USB disconnections"
 echo "   • Mission-critical compass broadcasts (1Hz)"
-echo "   • Heartbeat monitoring (10s intervals)"
-echo "   • Hardware watchdog (if available)"
+echo "   • System health monitoring with watchdog"
 echo ""
 echo "📡 Network Configuration:"
 echo "   • Broadcast IP: 192.168.137.255"
 echo "   • Broadcast Port: 60000"
 echo ""
-echo "🚀 Next Steps:"
-echo "   1. Connect your GY-271 compass to I2C pins:"
-echo "      VCC → 3.3V (Pin 1)"
-echo "      GND → Ground (Pin 6)" 
-echo "      SCL → GPIO 3 (Pin 5)"
-echo "      SDA → GPIO 2 (Pin 3)"
-echo "   2. Connect your Garmin Montana 710 via USB"
+echo "🔧 Hardware Setup:"
+echo "   1. Connect GY-271 compass to I2C pins:"
+echo "      VCC → 3.3V (Pin 1), GND → Ground (Pin 6)"
+echo "      SCL → GPIO 3 (Pin 5), SDA → GPIO 2 (Pin 3)"
+echo "   2. Connect Garmin Montana 710 via USB (any port)"
 echo "   3. REBOOT THE SYSTEM: sudo reboot"
-echo "   4. Services will start automatically on boot"
 echo ""
-echo "🔍 Testing Commands (after reboot):"
-echo "   • Check status: sudo systemctl status gps-stream.service"
-echo "   • View logs: sudo journalctl -u gps-stream.service -f"
-echo "   • Listen to broadcasts: nc -u -l 60000"
-echo "   • Calibrate compass: sudo python3 /home/cuas/calibrate_compass.py"
+echo "🔍 Monitoring Commands:"
+echo "   • Service status: sudo systemctl status gps-stream.service"
+echo "   • Live logs: sudo journalctl -u gps-stream.service -f"
+echo "   • Listen to data: nc -u -l 60000"
+echo "   • Device detection: cat /tmp/garmin_device_path"
 echo ""
-echo "📋 Log Files:"
-echo "   • Main system: /var/log/garmin_reader.log"
-echo "   • Watchdog: /var/log/system_watchdog.log"
-echo "   • Service: sudo journalctl -u gps-stream.service"
+echo -e "${YELLOW}⚠️ IMPORTANT: REBOOT REQUIRED FOR FULL FUNCTIONALITY${NC}"
+echo "   System will automatically detect and configure Garmin device on startup"
 echo ""
-echo -e "${YELLOW}⚠️  IMPORTANT: REBOOT REQUIRED FOR FULL FUNCTIONALITY${NC}"
-echo -e "${YELLOW}   System will reboot automatically on critical failures${NC}"
-echo -e "${YELLOW}   This ensures mission-critical operation without intervention${NC}"
-echo ""
-echo "💡 System is designed to work without hardware connected"
-echo "   Connect GPS and compass when ready - system will detect them"
-echo ""
-echo "🆘 Support: Check the GitHub repository for documentation"
-echo ""
-log_info "Installation completed!"
+
+log_info "Enhanced installation completed!"
 log_warn "REBOOT REQUIRED: sudo reboot"
