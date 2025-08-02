@@ -27,20 +27,45 @@ find_garmin_device() {
         if [ -c "$device" ]; then
             log "Checking device: $device"
             
-            # SIMPLE APPROACH: Use udevadm to check for Garmin IDs
-            if udevadm info -a -n "$device" 2>/dev/null | grep -q 'ATTRS{idVendor}=="091e"' && \
-               udevadm info -a -n "$device" 2>/dev/null | grep -q 'ATTRS{idProduct}=="0003"'; then
+            # Use sysfs method (more reliable than udevadm)
+            device_num=$(basename "$device" | sed 's/ttyUSB//')
+            usb_path="/sys/class/tty/ttyUSB${device_num}/device"
+            
+            if [ -d "$usb_path" ]; then
+                # Walk up the device tree to find USB info
+                current_path="$usb_path"
+                vendor_id=""
+                product_id=""
                 
-                log "✅ Found Garmin Montana 710 at $device"
+                for i in {1..5}; do
+                    if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
+                        vendor_id=$(cat "$current_path/idVendor" 2>/dev/null)
+                        product_id=$(cat "$current_path/idProduct" 2>/dev/null)
+                        break
+                    fi
+                    current_path=$(dirname "$current_path")
+                    if [ "$current_path" = "/" ]; then
+                        break
+                    fi
+                done
                 
-                # Set proper permissions
-                chmod 666 "$device" || log "Warning: Could not set permissions on $device"
+                log "Device $device: Vendor=$vendor_id, Product=$product_id"
                 
-                log "Garmin device configured: $device"
-                detected_device="$device"
-                return 0
+                # Check if this is a Garmin Montana 710 (vendor 091e, product 0003)
+                if [ "$vendor_id" = "091e" ] && [ "$product_id" = "0003" ]; then
+                    log "✅ Found Garmin Montana 710 at $device"
+                    
+                    # Set proper permissions
+                    chmod 666 "$device" || log "Warning: Could not set permissions on $device"
+                    
+                    log "Garmin device configured: $device"
+                    detected_device="$device"  # Set the GLOBAL variable
+                    return 0
+                else
+                    log "Device $device is not a Garmin Montana 710"
+                fi
             else
-                log "Device $device is not a Garmin Montana 710"
+                log "No USB info found for $device"
             fi
         fi
     done
