@@ -596,10 +596,12 @@ class GarminReader:
                 gpsd_sock = self.connect_to_gpsd()
                 if not gpsd_sock:
                     logger.warning("GPSD connection failed, attempting restart...")
-                    if self.gpsd_manager.restart_gpsd_with_device():
+                    try:
+                        subprocess.run(['/home/cuas/gps_startup_cleanup.sh'], check=True, timeout=120)
                         time.sleep(3)
                         continue
-                    else:
+                    except Exception as e:
+                        logger.error(f"GPSD restart failed: {e}")
                         time.sleep(5)
                         continue
                 
@@ -732,6 +734,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
