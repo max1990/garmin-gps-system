@@ -64,24 +64,16 @@ detect_garmin_devices() {
         
         for device in /dev/ttyUSB*; do
             if [ -c "$device" ]; then
-                device_num=$(basename "$device" | sed 's/ttyUSB//')
-                usb_path="/sys/class/tty/ttyUSB${device_num}/device"
-                
                 log_info "  Checking $device..."
                 
-                if [ -d "$usb_path" ]; then
-                    # SIMPLE APPROACH: Get ALL vendor/product IDs
-                    all_vendors=$(find "$usb_path" -name "idVendor" -exec cat {} \; 2>/dev/null | tr '\n' ' ')
-                    all_products=$(find "$usb_path" -name "idProduct" -exec cat {} \; 2>/dev/null | tr '\n' ' ')
+                # SIMPLE APPROACH: Use udevadm to check for Garmin IDs
+                if udevadm info -a -n "$device" 2>/dev/null | grep -q 'ATTRS{idVendor}=="091e"' && \
+                   udevadm info -a -n "$device" 2>/dev/null | grep -q 'ATTRS{idProduct}=="0003"'; then
                     
-                    log_info "    All vendors: $all_vendors"
-                    log_info "    All products: $all_products"
-                    
-                    # Check if Garmin IDs are ANYWHERE in the tree
-                    if echo "$all_vendors" | grep -q "091e" && echo "$all_products" | grep -q "0003"; then
-                        log_info "    ✅ GARMIN MONTANA 710 DETECTED!"
-                        found_garmin=true
-                    fi
+                    log_info "    ✅ GARMIN MONTANA 710 DETECTED!"
+                    found_garmin=true
+                else
+                    log_info "    Not a Garmin Montana 710"
                 fi
             fi
         done
