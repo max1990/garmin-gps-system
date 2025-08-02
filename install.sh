@@ -208,7 +208,6 @@ download_with_retry "$BASE_URL/gps-stream.service" "/etc/systemd/system/gps-stre
 download_with_retry "$BASE_URL/gps-system-watchdog.service" "/etc/systemd/system/gps-system-watchdog.service" "Watchdog service" || exit 1
 
 # Optional files
-download_with_retry "$BASE_URL/run_gps_service.sh" "/home/cuas/run_gps_service.sh" "GPS service runner" || true
 download_with_retry "$BASE_URL/start_gps_broadcaster.sh" "/home/cuas/start_gps_broadcaster.sh" "Legacy compatibility script" || true
 
 # Permissions and ownership
