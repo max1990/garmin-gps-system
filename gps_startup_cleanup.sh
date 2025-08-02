@@ -11,7 +11,8 @@ Date: 30 July 2025
 """
 
 LOG_FILE="/var/log/gps_startup_cleanup.log"
-DEVICE_FILE="/tmp/garmin_device_path"
+# Device file removed, using environment variable instead
+# DEVICE_FILE="/tmp/garmin_device_path"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
@@ -22,8 +23,8 @@ find_garmin_device() {
     log "=== Garmin Device Detection ==="
     detected_device=""
     
-    # Clear any previous device file
-    rm -f "$DEVICE_FILE"
+    # Clear any previous device file - sunset function
+    # rm -f "$DEVICE_FILE"
     
     # Check each ttyUSB device for Garmin vendor/product ID
     for device in /dev/ttyUSB*; do
