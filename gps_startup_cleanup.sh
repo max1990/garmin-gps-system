@@ -1,14 +1,13 @@
 #!/bin/bash
-"""
 
-Enhanced GPS System Startup Cleanup Script with Garmin USB Detection
-This ensures clean startup by removing GPSD conflicts AND finds the Garmin device
+# Enhanced GPS System Startup Cleanup Script with Garmin USB Detection
+# This ensures clean startup by removing GPSD conflicts AND finds the Garmin device
 
-Author: Maximilian J Leutermann
-Date: 30 July 2025
+# Author: Maximilian J Leutermann
+# Date: 30 July 2025
 
 
-"""
+
 
 LOG_FILE="/var/log/gps_startup_cleanup.log"
 # Device file removed, using environment variable instead
