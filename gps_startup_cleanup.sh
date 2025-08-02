@@ -20,6 +20,7 @@ log() {
 # Function to find Garmin device by USB vendor/product ID
 find_garmin_device() {
     log "=== Garmin Device Detection ==="
+    detected_device=""
     
     # Clear any previous device file
     rm -f "$DEVICE_FILE"
@@ -61,6 +62,7 @@ find_garmin_device() {
                     chmod 666 "$device" || log "Warning: Could not set permissions on $device"
                     
                     log "Garmin device configured: $device"
+                    detected_device="$device"
                     return 0
                 fi
             else
@@ -176,6 +178,7 @@ main() {
         log "  3. USB cable is working properly"
         exit 1
     fi
+    echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
     
     # Step 3: Clean up GPSD
     if ! cleanup_gpsd; then
