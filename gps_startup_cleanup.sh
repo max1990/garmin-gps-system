@@ -52,45 +52,6 @@ find_garmin_device() {
     return 1
 }
 
-# Check if we found Garmin at this device
-if [ "$garmin_found_here" = true ]; then
-                
-                log "Device $device: Vendor=$vendor_id, Product=$product_id"
-                
-                # Check if this is a Garmin device (vendor 091e, product 0003)
-                if [ "$vendor_id" = "091e" ] && [ "$product_id" = "0003" ]; then
-                    log "✅ Found Garmin Montana 710 at $device"
-                    
-                    # Set proper permissions
-                    chmod 666 "$device" || log "Warning: Could not set permissions on $device"
-                    
-                    log "Garmin device configured: $device"
-                    detected_device="$device"
-                    return 0
-                fi
-            else
-                log "No USB info found for $device"
-            fi
-        fi
-    done
-    
-    log "❌ No Garmin device found with vendor ID 091e and product ID 0003"
-    
-    # Fallback: if no specific Garmin found, try /dev/ttyUSB0 if it exists
-    if [ -c "/dev/ttyUSB0" ]; then
-        log "❌ CRITICAL: No Garmin detected, using UNSAFE fallback /dev/ttyUSB0"
-        log "⚠️ This device may NOT be a Garmin Montana 710!"
-        log "⚠️ GPS functionality may not work correctly!"
-        log "No fallback - system MUST have Garmin device"
-        exit 1
-    else
-        log "❌ CRITICAL: No USB devices found at all"
-        exit 1
-    fi
-    
-    return 1
-}
-
 # Enhanced GPSD cleanup with verification
 cleanup_gpsd() {
     log "=== Enhanced GPSD Cleanup ==="
@@ -170,7 +131,7 @@ main() {
     log "=== Enhanced GPS System Startup Cleanup ==="
     
     # Step 1: Wait for USB to stabilize
-    wait_for_usb_stable
+    wait_for_usb_stable()
     
     # Step 2: Find Garmin device
     if ! find_garmin_device; then
