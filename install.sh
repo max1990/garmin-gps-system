@@ -69,28 +69,19 @@ detect_garmin_devices() {
                 
                 log_info "  Checking $device..."
                 
-                # Try to find USB vendor/product info
                 if [ -d "$usb_path" ]; then
-                    # Look for vendor/product IDs
-                    current_path="$usb_path"
-                    for i in {1..5}; do
-                        vendor_file="$current_path/idVendor"
-                        product_file="$current_path/idProduct"
-                        
-                        if [ -f "$vendor_file" ] && [ -f "$product_file" ]; then
-                            vendor_id=$(cat "$vendor_file" 2>/dev/null)
-                            product_id=$(cat "$product_file" 2>/dev/null)
-                            
-                            log_info "    Vendor: $vendor_id, Product: $product_id"
-                            
-                            if [ "$vendor_id" = "091e" ] && [ "$product_id" = "0003" ]; then
-                                log_info "    ✅ GARMIN MONTANA 710 DETECTED!"
-                                found_garmin=true
-                            fi
-                            break
-                        fi
-                        current_path=$(dirname "$current_path")
-                    done
+                    # SIMPLE APPROACH: Get ALL vendor/product IDs
+                    all_vendors=$(find "$usb_path" -name "idVendor" -exec cat {} \; 2>/dev/null | tr '\n' ' ')
+                    all_products=$(find "$usb_path" -name "idProduct" -exec cat {} \; 2>/dev/null | tr '\n' ' ')
+                    
+                    log_info "    All vendors: $all_vendors"
+                    log_info "    All products: $all_products"
+                    
+                    # Check if Garmin IDs are ANYWHERE in the tree
+                    if echo "$all_vendors" | grep -q "091e" && echo "$all_products" | grep -q "0003"; then
+                        log_info "    ✅ GARMIN MONTANA 710 DETECTED!"
+                        found_garmin=true
+                    fi
                 fi
             fi
         done
