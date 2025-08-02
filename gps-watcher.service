@@ -1,0 +1,17 @@
+[Unit]
+Description=GPS Data Flow Watcher
+After=gps-stream.service
+Wants=gps-stream.service
+
+[Service]
+Type=simple
+ExecStart=/home/cuas/gps_watcher.sh
+Restart=always
+RestartSec=10
+User=root
+Group=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
