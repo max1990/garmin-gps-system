@@ -1,17 +1,15 @@
+sudo tee /home/cuas/gps_startup_cleanup.sh > /dev/null << 'EOF'
 #!/bin/bash
 
 # Enhanced GPS System Startup Cleanup Script with Garmin USB Detection
 # This ensures clean startup by removing GPSD conflicts AND finds the Garmin device
-
 # Author: Maximilian J Leutermann
 # Date: 30 July 2025
 
-
-
-
 LOG_FILE="/var/log/gps_startup_cleanup.log"
-# Device file removed, using environment variable instead
-# DEVICE_FILE="/tmp/garmin_device_path"
+
+# GLOBAL VARIABLE - this is key!
+detected_device=""
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
@@ -20,7 +18,6 @@ log() {
 # Function to find Garmin device by USB vendor/product ID
 find_garmin_device() {
     log "=== Garmin Device Detection ==="
-    detected_device=""
     
     # Check each ttyUSB device for Garmin vendor/product ID
     for device in /dev/ttyUSB*; do
@@ -72,9 +69,18 @@ find_garmin_device() {
     
     log "❌ No Garmin device found with vendor ID 091e and product ID 0003"
     
-    # No fallback - system MUST have Garmin device
-    log "No fallback - system MUST have Garmin device"
-    return 1
+    # Fallback: if no specific Garmin found, try /dev/ttyUSB0 if it exists
+    if [ -c "/dev/ttyUSB0" ]; then
+        log "❌ CRITICAL: No Garmin detected, using UNSAFE fallback /dev/ttyUSB0"
+        log "⚠️ This device may NOT be a Garmin Montana 710!"
+        log "⚠️ GPS functionality may not work correctly!"
+        detected_device="/dev/ttyUSB0"  # Set the GLOBAL variable
+        chmod 666 "$detected_device" || log "Warning: Could not set permissions on $detected_device"
+        return 0
+    else
+        log "❌ CRITICAL: No USB devices found at all"
+        return 1
+    fi
 }
 
 # Enhanced GPSD cleanup with verification
@@ -156,7 +162,7 @@ main() {
     log "=== Enhanced GPS System Startup Cleanup ==="
     
     # Step 1: Wait for USB to stabilize
-    wait_for_usb_stable
+    wait_for_usb_stable   # FIXED: removed parentheses
     
     # Step 2: Find Garmin device
     if ! find_garmin_device; then
@@ -179,9 +185,15 @@ main() {
     log "✅ Garmin device ready: $detected_device"
     log "✅ GPSD conflicts resolved"
     
-    # Write to environment file (ONLY PLACE)
-    echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
-    chmod 644 /etc/default/gps-stream
+    # Write to environment file (ONLY PLACE) - FIXED: proper error checking
+    if [ -n "$detected_device" ]; then
+        echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
+        chmod 644 /etc/default/gps-stream
+        log "✅ Environment file written: GARMIN_DEVICE_PATH=$detected_device"
+    else
+        log "❌ CRITICAL: detected_device is empty!"
+        exit 1
+    fi
     
     log "=== GPS System Ready for Startup ==="
     exit 0
@@ -189,3 +201,4 @@ main() {
 
 # Run main function
 main "$@"
+EOF
