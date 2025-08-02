@@ -23,9 +23,6 @@ find_garmin_device() {
     log "=== Garmin Device Detection ==="
     detected_device=""
     
-    # Clear any previous device file - sunset function
-    # rm -f "$DEVICE_FILE"
-    
     # Check each ttyUSB device for Garmin vendor/product ID
     for device in /dev/ttyUSB*; do
         if [ -c "$device" ]; then
@@ -38,20 +35,49 @@ find_garmin_device() {
             usb_path="/sys/class/tty/ttyUSB${device_num}/device"
             
             if [ -d "$usb_path" ]; then
-                # Try to find vendor and product IDs by traversing up the USB hierarchy
-                current_path="$usb_path"
-                vendor_id=""
-                product_id=""
+                # SIMPLE APPROACH: Get ALL vendor/product IDs in the entire USB tree
+                all_vendors=$(find "$usb_path" -name "idVendor" -exec cat {} \; 2>/dev/null | tr '\n' ' ')
+                all_products=$(find "$usb_path" -name "idProduct" -exec cat {} \; 2>/dev/null | tr '\n' ' ')
                 
-                # Go up the hierarchy to find USB device info
-                for i in {1..5}; do
-                    if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
-                        vendor_id=$(cat "$current_path/idVendor" 2>/dev/null)
-                        product_id=$(cat "$current_path/idProduct" 2>/dev/null)
-                        break
-                    fi
-                    current_path=$(dirname "$current_path")
-                done
+                log "Device $device - All vendors found: $all_vendors"
+                log "Device $device - All products found: $all_products"
+                
+                # Check if Garmin IDs are ANYWHERE in the USB tree
+                if echo "$all_vendors" | grep -q "091e" && echo "$all_products" | grep -q "0003"; then
+                    log "✅ Found Garmin Montana 710 at $device"
+                    
+                    # Set proper permissions
+                    chmod 666 "$device" || log "Warning: Could not set permissions on $device"
+                    
+                    log "Garmin device configured: $device"
+                    detected_device="$device"
+                    return 0
+                fi
+            else
+                log "No USB info found for $device"
+            fi
+        fi
+    done
+    
+    log "❌ No Garmin device found with vendor ID 091e and product ID 0003"
+    
+    # Fallback: if no specific Garmin found, try /dev/ttyUSB0 if it exists
+    if [ -c "/dev/ttyUSB0" ]; then
+        log "❌ CRITICAL: No Garmin detected, using UNSAFE fallback /dev/ttyUSB0"
+        log "⚠️ This device may NOT be a Garmin Montana 710!"
+        log "⚠️ GPS functionality may not work correctly!"
+        log "No fallback - system MUST have Garmin device"
+        exit 1
+    else
+        log "❌ CRITICAL: No USB devices found at all"
+        exit 1
+    fi
+    
+    return 1
+}
+
+# Check if we found Garmin at this device
+if [ "$garmin_found_here" = true ]; then
                 
                 log "Device $device: Vendor=$vendor_id, Product=$product_id"
                 
