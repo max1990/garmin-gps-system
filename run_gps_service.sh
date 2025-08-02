@@ -12,7 +12,8 @@ log() {
 }
 
 # --- CONFIG ---
-DEVICE=$(cat /tmp/garmin_device_path 2>/dev/null || echo "/dev/ttyUSB0")
+# Read from environment instead of file
+DEVICE="${GARMIN_DEVICE_PATH:-/dev/ttyUSB0}"
 if [ "$DEVICE" = "/dev/ttyUSB0" ]; then
     log "WARNING: Using fallback device /dev/ttyUSB0 - detection may have failed"
 else
