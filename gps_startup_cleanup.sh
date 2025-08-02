@@ -56,7 +56,6 @@ find_garmin_device() {
                 # Check if this is a Garmin device (vendor 091e, product 0003)
                 if [ "$vendor_id" = "091e" ] && [ "$product_id" = "0003" ]; then
                     log "✅ Found Garmin Montana 710 at $device"
-                    echo "$device" > "$DEVICE_FILE"
                     
                     # Set proper permissions
                     chmod 666 "$device" || log "Warning: Could not set permissions on $device"
