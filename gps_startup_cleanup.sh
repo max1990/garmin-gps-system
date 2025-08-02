@@ -78,8 +78,8 @@ find_garmin_device() {
         log "❌ CRITICAL: No Garmin detected, using UNSAFE fallback /dev/ttyUSB0"
         log "⚠️ This device may NOT be a Garmin Montana 710!"
         log "⚠️ GPS functionality may not work correctly!"
-        echo "/dev/ttyUSB0" > /tmp/garmin_device_fallback  # Different file name
-        exit 2  # Different exit code to indicate fallback
+        log "No fallback - system MUST have Garmin device"
+        exit 1
     else
         log "❌ CRITICAL: No USB devices found at all"
         exit 1
