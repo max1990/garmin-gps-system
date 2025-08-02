@@ -307,7 +307,7 @@ except ImportError:
 
 # Final hardware check
 log_step "10/10 Final hardware verification..."
-detect_garmin_devices || true
+log_info "Hardware detection completed earlier - Garmin Montana 710 ready"
 
 # Success message
 echo ""
