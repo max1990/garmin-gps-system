@@ -1,3 +1,8 @@
+# Start Garmin GPS Script to fix the startup issues
+# Author: Maximilian Leutermann
+# Date: 1 August 2025
+
+
 #!/bin/bash
 echo "=== Starting Garmin GPS System ==="
 echo "Searching USB0-USB10 for working Garmin..."
