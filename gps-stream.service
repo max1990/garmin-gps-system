@@ -15,10 +15,6 @@ Group=root
 EnvironmentFile=-/etc/default/gps-stream
 Environment=PYTHONUNBUFFERED=1
 
-
-
-
-
 # Enhanced restart behavior
 Restart=always
 RestartSec=15
@@ -26,7 +22,6 @@ StartLimitBurst=5
 StartLimitIntervalSec=300
 
 # Watchdog configuration
-Type=notify
 WatchdogSec=60
 NotifyAccess=main
 
