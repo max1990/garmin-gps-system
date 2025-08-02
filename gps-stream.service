@@ -12,7 +12,12 @@ ExecStart=/usr/bin/python3 /home/cuas/garminReader.py
 WorkingDirectory=/home/cuas
 User=root
 Group=root
+EnvironmentFile=-/etc/default/gps-stream
 Environment=PYTHONUNBUFFERED=1
+
+
+
+
 
 # Enhanced restart behavior
 Restart=always
@@ -21,6 +26,7 @@ StartLimitBurst=5
 StartLimitIntervalSec=300
 
 # Watchdog configuration
+Type=notify
 WatchdogSec=60
 NotifyAccess=main
 
