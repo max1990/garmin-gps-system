@@ -191,7 +191,8 @@ main() {
     log "✅ GPSD conflicts resolved"
     
     # Export device path for the main service
-    echo "GARMIN_DEVICE_PATH=$detected_device" > /tmp/garmin_environment
+    echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
+    chmod 644 /etc/default/gps-stream
     
     log "=== GPS System Ready for Startup ==="
     exit 0
