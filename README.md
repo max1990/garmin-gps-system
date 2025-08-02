@@ -18,7 +18,7 @@ Before installation, test if your Garmin Montana 710 is properly detected:
 # Download and run the hardware test
 ```bash
 curl -fsSL https://raw.githubusercontent.com/max1990/garmin-gps-system/main/test_garmin_detection.sh | sudo bash
-```bash
+```
 
 ## Quick Installation
 
