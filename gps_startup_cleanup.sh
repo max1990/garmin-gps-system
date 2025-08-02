@@ -178,7 +178,6 @@ main() {
         log "  3. USB cable is working properly"
         exit 1
     fi
-    echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
     
     # Step 3: Clean up GPSD
     if ! cleanup_gpsd; then
@@ -186,13 +185,12 @@ main() {
         exit 1
     fi
     
-    # Step 4: Final verification
-    detected_device=$(cat "$DEVICE_FILE" 2>/dev/null || echo "none")
+    # Step 4: Export device path for the main service (SINGLE SOURCE OF TRUTH)
     log "✅ Startup cleanup complete"
     log "✅ Garmin device ready: $detected_device"
     log "✅ GPSD conflicts resolved"
     
-    # Export device path for the main service
+    # Write to environment file (ONLY PLACE)
     echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
     chmod 644 /etc/default/gps-stream
     
