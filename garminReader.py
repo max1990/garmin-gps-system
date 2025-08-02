@@ -527,25 +527,24 @@ class GarminReader:
                     self.gpsd_connected = False
                     consecutive_failures += 1
                     
-                if consecutive_failures >= max_failures:
-                    logger.error(f"Device failed {consecutive_failures} times, running startup cleanup")
-                    # Run the startup cleanup script which will find and start the working device
-                    try:
-                        subprocess.run(['/home/cuas/gps_startup_cleanup.sh'], check=True, timeout=120)
-                        consecutive_failures = 0
-                        logger.info("Device discovery and startup completed")
-                    except Exception as e:
-                        logger.error(f"Device discovery failed: {e}")
+                    if consecutive_failures >= max_failures:
+                        logger.error(f"Device failed {consecutive_failures} times, running device discovery")
+                        try:
+                            subprocess.run(['/home/cuas/gps_startup_cleanup.sh'], check=True, timeout=120)
+                            consecutive_failures = 0
+                            logger.info("Device discovery and startup completed")
+                        except Exception as e:
+                            logger.error(f"Device discovery failed: {e}")
                 
                 # Device reconnected
                 elif device_present and not self.gpsd_manager.device_present:
                     logger.info("GPS device reconnected! Starting recovery...")
-                    if self.gpsd_manager.restart_gpsd_with_device():
+                    try:
+                        subprocess.run(['/home/cuas/gps_startup_cleanup.sh'], check=True, timeout=120)
                         consecutive_failures = 0
-                        time.sleep(5)
                         logger.info("Device reconnection recovery completed")
-                    else:
-                        logger.error("Device reconnection recovery failed")
+                    except Exception as e:
+                        logger.error(f"Device reconnection recovery failed: {e}")
                         consecutive_failures += 1
                 
                 # Device stable
@@ -733,6 +732,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
