@@ -302,7 +302,7 @@ class EnhancedGPSDManager:
             
             # Step 4: Start GPSD (exact command that works)
             logger.info("Starting GPSD...")
-            cmd = ['sudo', 'gpsd', '-n', '-N', '-F', '/tmp/gpsd.sock', device_path]
+            cmd = ['sudo', 'gpsd', '-b', '-n', '-N', '-F', '/tmp/gpsd.sock', '-S', '4800', device_path]
             
             # Start GPSD process
             process = subprocess.Popen(cmd, 
@@ -731,6 +731,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
