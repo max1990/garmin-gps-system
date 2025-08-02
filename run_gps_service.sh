@@ -7,7 +7,13 @@
 set -euo pipefail
 
 # --- CONFIG ---
-DEVICE="/dev/ttyUSB0"
+DEVICE=$(cat /tmp/garmin_device_path 2>/dev/null || echo "/dev/ttyUSB0")
+if [ "$DEVICE" = "/dev/ttyUSB0" ]; then
+    log "WARNING: Using fallback device /dev/ttyUSB0 - detection may have failed"
+else
+    log "Using detected Garmin device: $DEVICE"
+fi
+
 GPSD_SOCKET="/var/run/gpsd.sock"
 SCRIPT_PATH="/home/cuas/garminReader.py"
 LOG_FILE="/var/log/gps_service.log"
@@ -22,8 +28,8 @@ log() {
 # Cleanup function
 cleanup() {
     log "Cleaning up processes..."
-    sudo pkill gpsd || true
-    sudo pkill -f garminReader.py || true
+    pkill gpsd || true
+    pkill -f garminReader.py || true
 }
 
 # Signal handlers
@@ -112,7 +118,7 @@ start_gpsd() {
     [ -e "$GPSD_SOCKET" ] && rm -f "$GPSD_SOCKET"
     
     # Start gpsd
-    if sudo gpsd "$DEVICE" -F "$GPSD_SOCKET" -n; then
+    if gpsd "$DEVICE" -F "$GPSD_SOCKET" -n; then
         log "gpsd started successfully"
         sleep 3  # Give gpsd time to initialize
         
