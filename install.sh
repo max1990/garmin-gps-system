@@ -185,6 +185,7 @@ download_with_retry "$BASE_URL/garminReader.py" "/home/cuas/garminReader.py" "En
 download_with_retry "$BASE_URL/gps_startup_cleanup.sh" "/home/cuas/gps_startup_cleanup.sh" "Enhanced startup cleanup script" || exit 1
 download_with_retry "$BASE_URL/system_watchdog.py" "/home/cuas/system_watchdog.py" "system_watchdog.py" || exit 1
 download_with_retry "$BASE_URL/calibrate_compass.py" "/home/cuas/calibrate_compass.py" "calibrate_compass.py" || exit 1
+download_with_retry "$BASE_URL/start_garmin_gps.sh" "/home/cuas/start_garmin_gps.sh" "Automated Garmin GPS Startup" || exit 1
 
 # Service files
 download_with_retry "$BASE_URL/gps-stream.service" "/etc/systemd/system/gps-stream.service" "Enhanced GPS service" || exit 1
