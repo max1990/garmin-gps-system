@@ -135,30 +135,20 @@ main() {
     log "=== Enhanced GPS System Startup Cleanup ==="
     
     # Step 1: Wait for USB to stabilize
-    wait_for_usb_stable   # FIXED: removed parentheses
+    wait_for_usb_stable
     
-    # Step 2: Find Garmin device
+    # Step 2: Find Garmin device (this handles all cleanup AND starts working GPSD)
     if ! find_garmin_device; then
         log "❌ CRITICAL: No Garmin device found - GPS will not work"
-        log "Please check:"
-        log "  1. Garmin Montana 710 is connected via USB"
-        log "  2. Device has vendor ID 091e and product ID 0003"
-        log "  3. USB cable is working properly"
         exit 1
     fi
     
-    # Step 3: Clean up GPSD
-    if ! cleanup_gpsd; then
-        log "❌ CRITICAL: GPSD cleanup failed"
-        exit 1
-    fi
-    
-    # Step 4: Export device path for the main service (SINGLE SOURCE OF TRUTH)
+    # Step 3: Export device path for the main service (SINGLE SOURCE OF TRUTH)
     log "✅ Startup cleanup complete"
     log "✅ Garmin device ready: $detected_device"
     log "✅ GPSD conflicts resolved"
     
-    # Write to environment file (ONLY PLACE) - FIXED: proper error checking
+    # Write to environment file (ONLY PLACE)
     if [ -n "$detected_device" ]; then
         echo "GARMIN_DEVICE_PATH=$detected_device" > /etc/default/gps-stream
         chmod 644 /etc/default/gps-stream
