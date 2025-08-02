@@ -2,6 +2,7 @@
 
 # Test Script for Garmin Montana 710 Detection
 # This script tests the automatic device detection functionality
+# Run this BEFORE installing the GPS system to verify your hardware
 # Author: Maximilian Leutermann
 
 echo "=========================================="
