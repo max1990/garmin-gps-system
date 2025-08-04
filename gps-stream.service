@@ -1,7 +1,8 @@
 [Unit]
 Description=Enhanced Garmin GPS Broadcaster with Auto-Detection
-After=network-online.target
+After=network-online.target heading-reader.service
 Wants=network-online.target
+Requires=heading-reader.service
 Before=gpsd.service
 Conflicts=gpsd.service gpsd.socket
 
