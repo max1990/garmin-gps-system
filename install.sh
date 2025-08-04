@@ -188,7 +188,7 @@ download_with_retry "$BASE_URL/calibrate_compass.py" "/home/cuas/calibrate_compa
 download_with_retry "$BASE_URL/start_garmin_gps.sh" "/home/cuas/start_garmin_gps.sh" "Garmin GPS Auto-Discovery" || exit 1
 download_with_retry "$BASE_URL/gps_watcher.sh" "/home/cuas/gps_watcher.sh" "GPS Data Flow Watcher" || exit 1
 download_with_retry "$BASE_URL/heading_reader.py" "/home/cuas/heading_reader.py" "Heading Reader for WT901 IMU" || exit 1
-download_with_retry "$BASE_URL/device_model.py" "/home/cuas/device_model.py" "WT901 Device Model" || exit 1
+download_with_retry "$BASE_URL/device_model_original.py" "/home/cuas/device_model_original.py" "WT901 Device Model" || exit 1
 
 # Service files
 download_with_retry "$BASE_URL/gps-stream.service" "/etc/systemd/system/gps-stream.service" "Enhanced GPS service" || exit 1
