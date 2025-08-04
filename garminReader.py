@@ -145,8 +145,27 @@ class GarminDeviceDetector:
         return self.detected_device
 
 class CompassReader:
-    """Independent compass reader for mission-critical heading data"""
-    
+
+    def read_heading(self):
+        """ Independent compass reader for heading data """
+        PIPE_PATH = "/tmp/heading_pipe"
+
+        if not os.path.exists(PIPE_PATH):
+            print(f"❌ FIFO not found: {PIPE_PATH}")
+            exit(1)
+
+        print(f"✅ Reading heading from {PIPE_PATH}...\n(Press Ctrl+C to stop)\n")
+
+        try:
+            with open(PIPE_PATH, "r") as pipe:
+                while True:
+                    line = pipe.readline().strip()
+                    if line:
+                        return line
+        except Exception as e:
+            logger.warning(f"Compass read error: {e}")
+
+    """
     def __init__(self):
         self.heading = 0.0
         self.last_valid_heading = 0.0
@@ -156,7 +175,7 @@ class CompassReader:
         self.calibration_offset_y = 0.0
         
     def load_calibration(self):
-        """Load compass calibration from file"""
+        # Load compass calibration from file
         try:
             with open('/home/cuas/compass_calibration.txt', 'r') as f:
                 lines = f.readlines()
@@ -167,7 +186,7 @@ class CompassReader:
             logger.warning(f"Could not load compass calibration: {e}, using defaults")
     
     def initialize(self):
-        """Initialize compass with error handling"""
+        # Initialize compass with error handling
         try:
             import smbus
             self.bus = smbus.SMBus(I2C_BUS)
@@ -190,7 +209,7 @@ class CompassReader:
             return False
     
     def read_heading(self):
-        """Read compass heading with error handling"""
+        # Read compass heading with error handling
         if not self.compass_active:
             with self.lock:
                 return self.last_valid_heading
@@ -228,9 +247,12 @@ class CompassReader:
             with self.lock:
                 return self.last_valid_heading
     
+    
     def get_heading(self):
         with self.lock:
             return self.heading
+
+    """
 
 class EnhancedGPSDManager:
     """Enhanced GPSD manager with automatic Garmin device detection"""
@@ -734,6 +756,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
