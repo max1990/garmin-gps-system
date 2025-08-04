@@ -260,12 +260,16 @@ else
     log_info "GPS optimizations already present in /boot/config.txt"
 fi
 
-# USB device permissions for Garmin
-cat > /etc/udev/rules.d/99-garmin-gps.rules << 'EOF'
+# USB device permissions for Garmin and WT901
+cat > /etc/udev/rules.d/99-gps-devices.rules << 'EOF'
 # Garmin Montana 710 GPS Device
 SUBSYSTEM=="tty", ATTRS{idVendor}=="091e", ATTRS{idProduct}=="0003", MODE="0666", GROUP="dialout", SYMLINK+="garmin_gps"
 # Generic Garmin devices
 SUBSYSTEM=="tty", ATTRS{idVendor}=="091e", MODE="0666", GROUP="dialout"
+# CH340/CH341 USB-Serial converters (for WT901)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0666", GROUP="dialout"
+# FTDI devices
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", MODE="0666", GROUP="dialout"
 EOF
 
 log_info "Added udev rules for Garmin devices"
