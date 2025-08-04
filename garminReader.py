@@ -145,114 +145,59 @@ class GarminDeviceDetector:
         return self.detected_device
 
 class CompassReader:
+    """
+    Continuously reads heading values from a named pipe and stores the latest valid one.
+    Provides formatted NMEA HCHDG output on request.
+    """
 
-    def read_heading(self):
-        """ Independent compass reader for heading data """
-        PIPE_PATH = "/tmp/heading_pipe"
+    def __init__(self, pipe_path="/tmp/heading_pipe"):
+        self.pipe_path = pipe_path
+        self.latest_heading = None
+        self._stop_flag = False
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._start_reader()
 
-        if not os.path.exists(PIPE_PATH):
-            print(f"❌ FIFO not found: {PIPE_PATH}")
-            exit(1)
+    def _start_reader(self):
+        if not os.path.exists(self.pipe_path):
+            raise FileNotFoundError(f"❌ FIFO not found: {self.pipe_path}")
+        self._thread.start()
 
-        print(f"✅ Reading heading from {PIPE_PATH}...\n(Press Ctrl+C to stop)\n")
+    def _nmea_checksum(self, nmea_str):
+        checksum = 0
+        for char in nmea_str:
+            checksum ^= ord(char)
+        return f"*{checksum:02X}"
 
+    def _format_hchdg(self, heading):
+        body = f"HCHDG,{heading:.2f},,,"
+        return f"${body}{self._nmea_checksum(body)}"
+
+    def _read_loop(self):
         try:
-            with open(PIPE_PATH, "r") as pipe:
-                while True:
+            with open(self.pipe_path, "r") as pipe:
+                while not self._stop_flag:
                     line = pipe.readline().strip()
-                    if line:
-                        return line
+                    if not line:
+                        time.sleep(0.1)
+                        continue
+                    try:
+                        self.latest_heading = float(line)
+                    except ValueError:
+                        print(f"⚠️ Invalid heading data: '{line}'")
         except Exception as e:
-            logger.warning(f"Compass read error: {e}")
+            print(f"❌ CompassReader error: {e}")
 
-    """
-    def __init__(self):
-        self.heading = 0.0
-        self.last_valid_heading = 0.0
-        self.compass_active = False
-        self.lock = threading.Lock()
-        self.calibration_offset_x = 0.0
-        self.calibration_offset_y = 0.0
-        
-    def load_calibration(self):
-        # Load compass calibration from file
-        try:
-            with open('/home/cuas/compass_calibration.txt', 'r') as f:
-                lines = f.readlines()
-                self.calibration_offset_x = float(lines[0].strip())
-                self.calibration_offset_y = float(lines[1].strip())
-                logger.info(f"Loaded compass calibration: X={self.calibration_offset_x}, Y={self.calibration_offset_y}")
-        except Exception as e:
-            logger.warning(f"Could not load compass calibration: {e}, using defaults")
-    
-    def initialize(self):
-        # Initialize compass with error handling
-        try:
-            import smbus
-            self.bus = smbus.SMBus(I2C_BUS)
-            
-            # Initialize QMC5883L
-            self.bus.write_byte_data(QMC5883L_ADDR, 0x0B, 0x01)  # SET/RESET
-            time.sleep(0.1)
-            self.bus.write_byte_data(QMC5883L_ADDR, 0x09, 0x1D)  # Control register
-            
-            self.load_calibration()
-            self.compass_active = True
-            logger.info("✅ Compass initialized successfully")
-            return True
-            
-        except ImportError:
-            logger.warning("smbus not available, compass disabled")
-            return False
-        except Exception as e:
-            logger.warning(f"Compass initialization failed: {e}")
-            return False
-    
-    def read_heading(self):
-        # Read compass heading with error handling
-        if not self.compass_active:
-            with self.lock:
-                return self.last_valid_heading
-        
-        try:
-            # Read raw magnetometer data
-            data = self.bus.read_i2c_block_data(QMC5883L_ADDR, 0x00, 6)
-            
-            # Convert to signed 16-bit values
-            x = (data[1] << 8) | data[0]
-            y = (data[3] << 8) | data[2]
-            
-            if x > 32767:
-                x -= 65536
-            if y > 32767:
-                y -= 65536
-            
-            # Apply calibration
-            x_cal = x - self.calibration_offset_x
-            y_cal = y - self.calibration_offset_y
-            
-            # Calculate heading
-            import math
-            heading_rad = math.atan2(y_cal, x_cal)
-            heading_deg = (math.degrees(heading_rad) + 360) % 360
-            
-            with self.lock:
-                self.heading = heading_deg
-                self.last_valid_heading = heading_deg
-                
-            return heading_deg
-            
-        except Exception as e:
-            logger.warning(f"Compass read error: {e}")
-            with self.lock:
-                return self.last_valid_heading
-    
-    
     def get_heading(self):
-        with self.lock:
-            return self.heading
+        return self.latest_heading
 
-    """
+    def get_nmea_sentence(self):
+        if self.latest_heading is None:
+            return None
+        return self._format_hchdg(self.latest_heading)
+
+    def stop(self):
+        self._stop_flag = True
+        self._thread.join()
 
 class EnhancedGPSDManager:
     """Enhanced GPSD manager with automatic Garmin device detection"""
@@ -447,9 +392,6 @@ class GarminReader:
         # Wait a moment for startup script to complete
         time.sleep(2)
         
-        # Initialize compass
-        self.compass.initialize()
-        
         # Find Garmin device
         device_path = self.gpsd_manager.get_device_path()
         if device_path:
@@ -496,7 +438,7 @@ class GarminReader:
             try:
                 timestamp = time.strftime("%H%M%S", time.gmtime())
                 device_status = "OK" if self.gpsd_manager.device_present else "NO_GPS"
-                compass_status = "OK" if self.compass.compass_active else "NO_COMPASS"
+                compass_status = "OK" if self.compass.get_heading() is not None else "NO_COMPASS"
                 
                 heartbeat = f"PIHBX,HEARTBEAT,{timestamp},{device_status},{compass_status}"
                 checksum = self.calculate_nmea_checksum(heartbeat)
@@ -516,24 +458,22 @@ class GarminReader:
         """Send periodic compass heading messages"""
         while self.running:
             try:
-                heading = self.compass.read_heading()
-                timestamp = time.strftime("%H%M%S", time.gmtime())
+                nmea = self.compass.get_nmea_sentence()
+                print("[DEBUG]:  ",nmea)
                 
-                # Create custom compass NMEA sentence -- FIX THIS, IT NEEDS TO BE STANDARD NMEA FORMAT
-                compass_data = f"HCHDG,{timestamp},{heading:.1f}"
-                checksum = self.calculate_nmea_checksum(compass_data)
-                message = f"${compass_data}*{checksum}"
-                
-                self.broadcast_message(message)
-                self.health.update_compass()
-                
-                logger.debug(f"Compass: {message}")
+                if nmea:
+                    self.broadcast_message(nmea)
+                    self.health.update_compass()
+                    logger.debug(f"Compass: {nmea}")
+                else:
+                    logger.debug("Compass: No valid heading received yet")
+
                 time.sleep(HEADING_INTERVAL)
-                
+
             except Exception as e:
                 logger.error(f"Compass error: {e}")
                 time.sleep(HEADING_INTERVAL)
-    
+
     def device_monitor_loop(self):
         """Enhanced device monitoring with automatic recovery"""
         consecutive_failures = 0
@@ -736,6 +676,9 @@ class GarminReader:
             
             if self.udp_sock:
                 self.udp_sock.close()
+
+            if hasattr(self.compass, "stop"):
+                self.compass.stop()
             
             logger.info("=== System Shutdown Complete ===")
 
@@ -756,13 +699,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
